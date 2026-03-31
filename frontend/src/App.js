@@ -1,53 +1,110 @@
-import { useEffect } from "react";
-import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import axios from "axios";
+import React, { useState, useEffect, useCallback } from 'react';
+import { BrowserRouter as Router, Routes, Route, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Toaster, toast } from 'sonner';
+import TopBar from './components/TopBar';
+import LocalitiesDrawer from './components/LocalitiesDrawer';
+import HomePage from './pages/HomePage';
+import BrowsePage from './pages/BrowsePage';
+import MeetingDetailPage from './pages/MeetingDetailPage';
+import './App.css';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 
-const Home = () => {
-  const helloWorldApi = async () => {
-    try {
-      const response = await axios.get(`${API}/`);
-      console.log(response.data.message);
-    } catch (e) {
-      console.error(e, `errored out requesting / api`);
-    }
-  };
+function AppContent() {
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('gal-theme') || 'light';
+  });
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [localities, setLocalities] = useState([]);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const navigate = useNavigate();
 
+  // Theme management
   useEffect(() => {
-    helloWorldApi();
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    localStorage.setItem('gal-theme', theme);
+  }, [theme]);
+
+  // Online/offline detection
+  useEffect(() => {
+    const handleOnline = () => { setIsOnline(true); toast.success('Online — sincronizat'); };
+    const handleOffline = () => { setIsOnline(false); toast.warning('Offline — salvat local'); };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
+  // Fetch localities
+  const fetchLocalities = useCallback(async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/localities`);
+      const data = await res.json();
+      setLocalities(data.localities || []);
+    } catch (err) {
+      console.error('Failed to fetch localities:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchLocalities();
+  }, [fetchLocalities]);
+
+  const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+
   return (
-    <div>
-      <header className="App-header">
-        <a
-          className="App-link"
-          href="https://emergent.sh"
-          target="_blank"
-          rel="noopener noreferrer"
+    <div className="min-h-screen bg-background text-foreground">
+      <TopBar
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        onOpenDrawer={() => setDrawerOpen(true)}
+        isOnline={isOnline}
+      />
+
+      {!isOnline && (
+        <div
+          data-testid="offline-status-banner"
+          className="sticky top-[56px] z-30 px-4 py-2 text-sm bg-[hsl(var(--gal-offline))]/10 text-[hsl(var(--gal-offline))] border-b border-[hsl(var(--gal-offline))]/20 flex items-center gap-2"
         >
-          <img src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4" />
-        </a>
-        <p className="mt-5">Building something incredible ~!</p>
-      </header>
+          <div className="w-2 h-2 rounded-full bg-[hsl(var(--gal-offline))] animate-status-pulse" />
+          Offline — salvat local
+        </div>
+      )}
+
+      <LocalitiesDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        localities={localities}
+        onSelectLocality={(loc) => {
+          setDrawerOpen(false);
+          if (loc) {
+            navigate(`/browse?locality=${encodeURIComponent(loc)}`);
+          } else {
+            navigate('/browse');
+          }
+        }}
+      />
+
+      <main className="mx-auto w-full max-w-md md:max-w-2xl">
+        <Routes>
+          <Route path="/" element={<HomePage backendUrl={BACKEND_URL} onMeetingCreated={fetchLocalities} />} />
+          <Route path="/browse" element={<BrowsePage backendUrl={BACKEND_URL} localities={localities} />} />
+          <Route path="/meeting/:id" element={<MeetingDetailPage backendUrl={BACKEND_URL} />} />
+        </Routes>
+      </main>
+
+      <Toaster position="top-center" richColors />
     </div>
   );
-};
+}
 
 function App() {
   return (
-    <div className="App">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />}>
-            <Route index element={<Home />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </div>
+    <Router>
+      <AppContent />
+    </Router>
   );
 }
 
