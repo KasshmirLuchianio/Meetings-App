@@ -8,6 +8,7 @@ import { Skeleton } from '../components/ui/skeleton';
 import { Separator } from '../components/ui/separator';
 import { FileAudio, CalendarDays, Mic, ArrowLeft } from 'lucide-react';
 import { Button } from '../components/ui/button';
+import { AnimatedList, AnimatedItem, FadeIn } from '../components/AnimatedList';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -100,17 +101,20 @@ export default function CalendarPage() {
   return (
     <div className="px-4 py-4 space-y-4 safe-bottom">
       {/* Back to recordings button */}
-      <Button
-        variant="outline"
-        onClick={() => navigate('/')}
-        className="w-full h-12 rounded-xl gap-2 text-sm font-medium border-primary/20 text-primary hover:bg-primary/5"
-        data-testid="calendar-back-to-record"
-      >
-        <Mic className="h-4 w-4" />
-        Înapoi la înregistrări
-      </Button>
+      <FadeIn delay={0}>
+        <Button
+          variant="outline"
+          onClick={() => navigate('/')}
+          className="w-full h-12 rounded-xl gap-2 text-sm font-medium border-primary/20 text-primary hover:bg-primary/5 active:scale-[0.98] transition-transform"
+          data-testid="calendar-back-to-record"
+        >
+          <Mic className="h-4 w-4" />
+          Înapoi la înregistrări
+        </Button>
+      </FadeIn>
 
       {/* Calendar Card */}
+      <FadeIn delay={0.05}>
       <Card className="rounded-2xl shadow-[0_6px_18px_hsl(var(--gal-shadow))] overflow-hidden" data-testid="meetings-calendar">
         <div className="px-4 pt-4 pb-2 flex items-center gap-2">
           <CalendarDays className="h-5 w-5 text-primary" />
@@ -167,8 +171,10 @@ export default function CalendarPage() {
           </div>
         </div>
       </Card>
+      </FadeIn>
 
       {/* Meetings for selected date */}
+      <FadeIn delay={0.1}>
       <div>
         <h2 className="text-base font-semibold font-['Space_Grotesk'] mb-3">
           Rapoarte — {selectedDate ? selectedDate.toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' }) : 'azi'}
@@ -191,23 +197,25 @@ export default function CalendarPage() {
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <AnimatedList className="space-y-3">
             {dayMeetings.map((meeting) => (
-              <MeetingCard
-                key={meeting._id}
-                meeting={meeting}
-                onDeleted={(id) => {
-                  setDayMeetings(prev => prev.filter(m => m._id !== id));
-                  fetchMeetingDates(currentMonth);
-                }}
-                onUpdated={(updated) => {
-                  setDayMeetings(prev => prev.map(m => m._id === updated._id ? updated : m));
-                }}
-              />
+              <AnimatedItem key={meeting._id}>
+                <MeetingCard
+                  meeting={meeting}
+                  onDeleted={(id) => {
+                    setDayMeetings(prev => prev.filter(m => m._id !== id));
+                    fetchMeetingDates(currentMonth);
+                  }}
+                  onUpdated={(updated) => {
+                    setDayMeetings(prev => prev.map(m => m._id === updated._id ? updated : m));
+                  }}
+                />
+              </AnimatedItem>
             ))}
-          </div>
+          </AnimatedList>
         )}
       </div>
+      </FadeIn>
     </div>
   );
 }

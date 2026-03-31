@@ -1,5 +1,4 @@
-/* GAL Meetings - Minimal App CSS */
-/* Most styling handled by Tailwind in index.css */
+/* GAL Meetings - Performance & Fluidity CSS */
 
 /* Safe area for PWA */
 .safe-bottom {
@@ -12,3 +11,32 @@
   bottom: 0;
   z-index: 30;
 }
+
+/* GPU-accelerated touch feedback */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Smooth momentum scrolling */
+.scroll-smooth {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+/* Hardware-accelerated elements */
+[data-testid="meeting-card"],
+[data-testid="record-toggle-button"],
+[data-testid="locality-folder-item"],
+.audio-player-sticky {
+  will-change: transform;
+  transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+/* Optimized skeleton shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
