@@ -208,12 +208,12 @@ export default function RecorderCard({ backendUrl, onRecordingComplete }) {
       <div className="flex justify-center">
         <div className="relative">
           {isRecording && (
-            <div className="absolute inset-[-12px] rounded-full border-2 border-[hsl(var(--gal-danger))]/30 animate-record-pulse" />
+            <div className="absolute inset-[-12px] rounded-full border-2 border-[hsl(var(--gal-danger))]/30 animate-record-pulse pointer-events-none" />
           )}
           <Button
             onClick={isRecording ? stopRecording : startRecording}
             disabled={isUploading}
-            className={`h-20 w-20 rounded-full shadow-[0_14px_40px_hsl(var(--gal-shadow))] ${
+            className={`h-20 w-20 rounded-full shadow-[0_14px_40px_hsl(var(--gal-shadow))] relative z-10 ${
               isRecording 
                 ? 'bg-[hsl(var(--gal-danger))] hover:bg-[hsl(var(--gal-danger))]/90' 
                 : 'bg-primary hover:bg-primary/90'
