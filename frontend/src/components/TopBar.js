@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from './ui/button';
-import { Menu, Sun, Moon, Mic, List, ArrowLeft, Wifi, WifiOff } from 'lucide-react';
+import { Menu, Sun, Moon, Mic, CalendarDays, ArrowLeft } from 'lucide-react';
 
 export default function TopBar({ theme, onToggleTheme, onOpenDrawer, isOnline }) {
   const navigate = useNavigate();
@@ -72,11 +72,11 @@ export default function TopBar({ theme, onToggleTheme, onOpenDrawer, isOnline })
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => navigate('/browse')}
+              onClick={() => navigate('/calendar')}
               className="h-10 w-10 rounded-xl"
-              data-testid="topbar-browse-button"
+              data-testid="topbar-calendar-button"
             >
-              <List className="h-5 w-5" />
+              <CalendarDays className="h-5 w-5" />
             </Button>
           )}
         </div>

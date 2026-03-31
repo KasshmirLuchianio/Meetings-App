@@ -105,6 +105,42 @@ body {
   overflow-x: hidden;
 }
 
+/* Calendar - meeting dots on days */
+.has-meetings-dot {
+  position: relative;
+}
+.has-meetings-dot::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: hsl(var(--primary));
+}
+.has-meetings-dot[aria-selected="true"]::after {
+  background-color: hsl(var(--primary-foreground));
+}
+
+/* Calendar responsive */
+.rdp {
+  --rdp-cell-size: 40px !important;
+}
+.rdp-month {
+  width: 100%;
+}
+.rdp-table {
+  width: 100%;
+}
+.rdp-head_row,
+.rdp-row {
+  justify-content: space-around;
+  width: 100%;
+}
+
+
 /* Mono font for timer */
 .font-mono-timer {
   font-family: 'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, monospace;

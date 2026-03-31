@@ -5,6 +5,7 @@ import TopBar from './components/TopBar';
 import LocalitiesDrawer from './components/LocalitiesDrawer';
 import HomePage from './pages/HomePage';
 import BrowsePage from './pages/BrowsePage';
+import CalendarPage from './pages/CalendarPage';
 import MeetingDetailPage from './pages/MeetingDetailPage';
 import './App.css';
 
@@ -91,6 +92,7 @@ function AppContent() {
         <Routes>
           <Route path="/" element={<HomePage backendUrl={BACKEND_URL} onMeetingCreated={fetchLocalities} />} />
           <Route path="/browse" element={<BrowsePage backendUrl={BACKEND_URL} localities={localities} />} />
+          <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/meeting/:id" element={<MeetingDetailPage backendUrl={BACKEND_URL} />} />
         </Routes>
       </main>

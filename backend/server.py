@@ -428,6 +428,63 @@ async def list_meetings(
     }
 
 
+# ---- CALENDAR: MEETING DATES ----
+
+@app.get("/api/meetings/calendar-dates")
+async def get_meeting_dates(
+    year: int = Query(...),
+    month: int = Query(...)
+):
+    """Get dates that have meetings for a given month (for calendar highlighting)."""
+    from calendar import monthrange
+    
+    start_date = datetime(year, month, 1, tzinfo=timezone.utc)
+    _, last_day = monthrange(year, month)
+    end_date = datetime(year, month, last_day, 23, 59, 59, tzinfo=timezone.utc)
+    
+    pipeline = [
+        {"$match": {
+            "created_at": {"$gte": start_date, "$lte": end_date}
+        }},
+        {"$group": {
+            "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}},
+            "count": {"$sum": 1}
+        }},
+        {"$sort": {"_id": 1}}
+    ]
+    
+    cursor = meetings_col.aggregate(pipeline)
+    dates = {}
+    async for doc in cursor:
+        dates[doc["_id"]] = doc["count"]
+    
+    return {"dates": dates}
+
+
+@app.get("/api/meetings/calendar-by-date")
+async def get_meetings_by_date(
+    date: str = Query(...)
+):
+    """Get meetings for a specific date (YYYY-MM-DD)."""
+    try:
+        target_date = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Format dată invalid. Folosiți YYYY-MM-DD")
+    
+    next_date = target_date.replace(hour=23, minute=59, second=59)
+    
+    query = {
+        "created_at": {"$gte": target_date, "$lte": next_date}
+    }
+    
+    cursor = meetings_col.find(query).sort("created_at", -1)
+    meetings = []
+    async for doc in cursor:
+        meetings.append(serialize_doc(doc))
+    
+    return {"meetings": meetings, "date": date, "count": len(meetings)}
+
+
 @app.get("/api/meetings/{meeting_id}")
 async def get_meeting(meeting_id: str):
     """Get single meeting detail."""
@@ -608,6 +665,8 @@ async def list_localities():
         })
     
     return {"localities": localities}
+
+
 
 
 # ---- EXPORT ----

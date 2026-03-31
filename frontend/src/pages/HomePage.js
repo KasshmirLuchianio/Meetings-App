@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import RecorderCard from '../components/RecorderCard';
 import MeetingCard from '../components/MeetingCard';
 import { Skeleton } from '../components/ui/skeleton';
-import { Separator } from '../components/ui/separator';
 import { FileAudio, ArrowRight } from 'lucide-react';
 import { Button } from '../components/ui/button';
 
@@ -103,7 +102,7 @@ export default function HomePage({ backendUrl, onMeetingCreated }) {
                 meeting={meeting}
                 onDeleted={(id) => {
                   setRecentMeetings(prev => prev.filter(m => m._id !== id));
-                  if (onMeetingCreated) onMeetingCreated(); // refresh localities
+                  if (onMeetingCreated) onMeetingCreated();
                 }}
                 onUpdated={(updated) => {
                   setRecentMeetings(prev => prev.map(m => m._id === updated._id ? updated : m));
