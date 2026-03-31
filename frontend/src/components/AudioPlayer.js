@@ -1,30 +1,78 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from './ui/button';
 import { Slider } from './ui/slider';
-import { Play, Pause, RotateCcw } from 'lucide-react';
+import { Play, Pause, RotateCcw, AlertCircle } from 'lucide-react';
 
 export default function AudioPlayer({ audioUrl }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [error, setError] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
   const audioRef = useRef(null);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    const onLoadedMetadata = () => setDuration(audio.duration || 0);
+    const onLoadedMetadata = () => {
+      setDuration(audio.duration || 0);
+      setIsLoading(false);
+      setError(null);
+    };
+    const onDurationChange = () => {
+      if (audio.duration && isFinite(audio.duration)) {
+        setDuration(audio.duration);
+      }
+    };
     const onTimeUpdate = () => setCurrentTime(audio.currentTime || 0);
     const onEnded = () => setIsPlaying(false);
+    const onCanPlayThrough = () => {
+      setIsLoading(false);
+      setError(null);
+    };
+    const onError = (e) => {
+      console.error('Audio error:', e);
+      setError('Eroare la redarea audio');
+      setIsPlaying(false);
+      setIsLoading(false);
+    };
+    const onWaiting = () => setIsLoading(true);
+    const onPlaying = () => {
+      setIsLoading(false);
+      setError(null);
+    };
+    const onStalled = () => {
+      // Don't set error on stall, just wait
+      console.warn('Audio stalled, waiting for data...');
+    };
+    const onPause = () => setIsPlaying(false);
 
     audio.addEventListener('loadedmetadata', onLoadedMetadata);
+    audio.addEventListener('durationchange', onDurationChange);
     audio.addEventListener('timeupdate', onTimeUpdate);
     audio.addEventListener('ended', onEnded);
+    audio.addEventListener('canplaythrough', onCanPlayThrough);
+    audio.addEventListener('error', onError);
+    audio.addEventListener('waiting', onWaiting);
+    audio.addEventListener('playing', onPlaying);
+    audio.addEventListener('stalled', onStalled);
+    audio.addEventListener('pause', onPause);
+
+    // Force load
+    audio.load();
 
     return () => {
       audio.removeEventListener('loadedmetadata', onLoadedMetadata);
+      audio.removeEventListener('durationchange', onDurationChange);
       audio.removeEventListener('timeupdate', onTimeUpdate);
       audio.removeEventListener('ended', onEnded);
+      audio.removeEventListener('canplaythrough', onCanPlayThrough);
+      audio.removeEventListener('error', onError);
+      audio.removeEventListener('waiting', onWaiting);
+      audio.removeEventListener('playing', onPlaying);
+      audio.removeEventListener('stalled', onStalled);
+      audio.removeEventListener('pause', onPause);
     };
   }, [audioUrl]);
 
@@ -35,31 +83,51 @@ export default function AudioPlayer({ audioUrl }) {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const togglePlay = () => {
+  const togglePlay = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
     if (isPlaying) {
       audio.pause();
+      setIsPlaying(false);
     } else {
-      audio.play().catch(console.error);
+      setError(null);
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => setIsPlaying(true))
+          .catch((err) => {
+            console.error('Play error:', err);
+            // On mobile, user gesture might be needed
+            if (err.name === 'NotAllowedError') {
+              setError('Apăsați din nou pentru a reda');
+            } else {
+              setError('Eroare la redare');
+            }
+            setIsPlaying(false);
+          });
+      } else {
+        setIsPlaying(true);
+      }
     }
-    setIsPlaying(!isPlaying);
-  };
+  }, [isPlaying]);
 
-  const handleSeek = (value) => {
+  const handleSeek = useCallback((value) => {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!audio || !isFinite(value[0])) return;
     audio.currentTime = value[0];
     setCurrentTime(value[0]);
-  };
+  }, []);
 
-  const restart = () => {
+  const restart = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
     audio.currentTime = 0;
     setCurrentTime(0);
-  };
+    if (!isPlaying) {
+      togglePlay();
+    }
+  }, [isPlaying, togglePlay]);
 
   if (!audioUrl) return null;
 
@@ -68,8 +136,21 @@ export default function AudioPlayer({ audioUrl }) {
       className="audio-player-sticky bg-background/95 backdrop-blur border-t border-border p-4"
       data-testid="meeting-audio-player"
     >
-      <audio ref={audioRef} src={audioUrl} preload="metadata" />
+      <audio
+        ref={audioRef}
+        src={audioUrl}
+        preload="auto"
+        playsInline
+        crossOrigin="anonymous"
+      />
       
+      {error && (
+        <div className="flex items-center gap-2 text-xs text-[hsl(var(--gal-danger))] mb-2">
+          <AlertCircle className="h-3 w-3" />
+          {error}
+        </div>
+      )}
+
       <div className="flex items-center gap-3">
         <Button
           variant="ghost"

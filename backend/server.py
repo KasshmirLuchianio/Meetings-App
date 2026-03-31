@@ -8,7 +8,7 @@ from pathlib import Path
 from io import BytesIO
 from typing import Optional, List
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
@@ -361,9 +361,9 @@ async def upload_audio(meeting_id: str, background_tasks: BackgroundTasks, file:
 
 
 @app.get("/api/meetings/{meeting_id}/audio")
-async def get_audio(meeting_id: str):
-    """Stream audio file for playback."""
-    from fastapi.responses import FileResponse
+async def get_audio(meeting_id: str, request: Request = None):
+    """Stream audio file with HTTP Range request support for mobile playback."""
+    from starlette.requests import Request as _Req
     
     meeting = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
     if not meeting or not meeting.get("audio_path"):
@@ -382,15 +382,68 @@ async def get_audio(meeting_id: str):
         "ogg": "audio/ogg"
     }
     media_type = media_types.get(ext, "audio/webm")
+    file_size = os.path.getsize(audio_path)
     
-    return FileResponse(
-        audio_path,
-        media_type=media_type,
-        headers={
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(os.path.getsize(audio_path))
-        }
-    )
+    # Check for Range header
+    range_header = None
+    if request and request.headers.get("range"):
+        range_header = request.headers.get("range")
+    
+    if range_header:
+        # Parse range: "bytes=start-end"
+        try:
+            range_spec = range_header.replace("bytes=", "")
+            parts = range_spec.split("-")
+            start = int(parts[0]) if parts[0] else 0
+            end = int(parts[1]) if parts[1] else file_size - 1
+        except (ValueError, IndexError):
+            start = 0
+            end = file_size - 1
+        
+        # Clamp values
+        start = max(0, min(start, file_size - 1))
+        end = max(start, min(end, file_size - 1))
+        content_length = end - start + 1
+        
+        async def range_file_generator():
+            async with aiofiles.open(audio_path, "rb") as f:
+                await f.seek(start)
+                remaining = content_length
+                while remaining > 0:
+                    chunk_size = min(65536, remaining)
+                    chunk = await f.read(chunk_size)
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+        
+        return StreamingResponse(
+            range_file_generator(),
+            status_code=206,
+            media_type=media_type,
+            headers={
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(content_length),
+                "Cache-Control": "public, max-age=3600",
+            }
+        )
+    else:
+        # Full file response
+        async def full_file_generator():
+            async with aiofiles.open(audio_path, "rb") as f:
+                while chunk := await f.read(65536):
+                    yield chunk
+        
+        return StreamingResponse(
+            full_file_generator(),
+            media_type=media_type,
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(file_size),
+                "Cache-Control": "public, max-age=3600",
+            }
+        )
 
 
 @app.get("/api/meetings")
