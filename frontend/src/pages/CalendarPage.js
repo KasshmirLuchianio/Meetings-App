@@ -6,7 +6,8 @@ import { Card } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Skeleton } from '../components/ui/skeleton';
 import { Separator } from '../components/ui/separator';
-import { FileAudio, CalendarDays } from 'lucide-react';
+import { FileAudio, CalendarDays, Mic, ArrowLeft } from 'lucide-react';
+import { Button } from '../components/ui/button';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -98,6 +99,17 @@ export default function CalendarPage() {
 
   return (
     <div className="px-4 py-4 space-y-4 safe-bottom">
+      {/* Back to recordings button */}
+      <Button
+        variant="outline"
+        onClick={() => navigate('/')}
+        className="w-full h-12 rounded-xl gap-2 text-sm font-medium border-primary/20 text-primary hover:bg-primary/5"
+        data-testid="calendar-back-to-record"
+      >
+        <Mic className="h-4 w-4" />
+        Înapoi la înregistrări
+      </Button>
+
       {/* Calendar Card */}
       <Card className="rounded-2xl shadow-[0_6px_18px_hsl(var(--gal-shadow))] overflow-hidden" data-testid="meetings-calendar">
         <div className="px-4 pt-4 pb-2 flex items-center gap-2">
@@ -107,7 +119,7 @@ export default function CalendarPage() {
           </h2>
         </div>
 
-        <div className="flex justify-center">
+        <div className="px-2">
           <Calendar
             mode="single"
             selected={selectedDate}

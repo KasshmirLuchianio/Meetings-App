@@ -124,20 +124,45 @@ body {
   background-color: hsl(var(--primary-foreground));
 }
 
-/* Calendar responsive */
+/* Calendar responsive - full width centered grid */
 .rdp {
   --rdp-cell-size: 40px !important;
+  width: 100% !important;
+  margin: 0 !important;
+}
+.rdp-months {
+  width: 100% !important;
 }
 .rdp-month {
-  width: 100%;
+  width: 100% !important;
 }
 .rdp-table {
-  width: 100%;
+  width: 100% !important;
+  max-width: 100% !important;
 }
-.rdp-head_row,
+.rdp-head_row {
+  display: flex !important;
+  width: 100% !important;
+}
+.rdp-head_cell {
+  flex: 1 !important;
+  text-align: center !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
 .rdp-row {
-  justify-content: space-around;
-  width: 100%;
+  display: flex !important;
+  width: 100% !important;
+}
+.rdp-cell {
+  flex: 1 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+.rdp-day {
+  margin: 0 auto !important;
 }
 
 
