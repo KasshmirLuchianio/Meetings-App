@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from './ui/sheet';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -15,10 +15,149 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './ui/alert-dialog';
-import { MapPin, FolderOpen, FolderPlus, ChevronRight } from 'lucide-react';
+import { MapPin, FolderOpen, FolderPlus, ChevronRight, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+
+function FolderItem({ loc, onSelect }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const longPressTimer = useRef(null);
+  const touchMoved = useRef(false);
+
+  const handleTouchStart = useCallback((e) => {
+    touchMoved.current = false;
+    longPressTimer.current = setTimeout(() => {
+      if (!touchMoved.current) {
+        e.preventDefault?.();
+        setMenuOpen(true);
+      }
+    }, 500);
+  }, []);
+
+  const handleTouchMove = useCallback(() => {
+    touchMoved.current = true;
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
+
+  const handleContextMenu = useCallback((e) => {
+    e.preventDefault();
+    setMenuOpen(true);
+  }, []);
+
+  const handleClick = useCallback(() => {
+    if (!menuOpen && !touchMoved.current) {
+      onSelect(loc.name);
+    }
+  }, [menuOpen, onSelect, loc.name]);
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/localities/${encodeURIComponent(loc.name)}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) throw new Error('Eroare la ștergere');
+      toast.success(`Folder "${loc.name}" șters`);
+      setDeleteDialogOpen(false);
+      setMenuOpen(false);
+      // Trigger parent refresh
+      if (loc.onDeleted) loc.onDeleted();
+    } catch (err) {
+      toast.error('Nu s-a putut șterge: ' + err.message);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        onClick={handleClick}
+        onContextMenu={handleContextMenu}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        className="w-full flex items-center justify-between p-4 rounded-xl hover:bg-secondary/50 transition-colors select-none"
+        data-testid="locality-folder-item"
+      >
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-accent flex items-center justify-center">
+            <MapPin className="h-5 w-5 text-accent-foreground" />
+          </div>
+          <div className="text-left">
+            <p className="font-medium">{loc.name}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="text-xs">{loc.count || 0}</Badge>
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        </div>
+      </button>
+
+      {/* Long-press action menu */}
+      <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+        <SheetContent side="bottom" className="rounded-t-2xl pb-8">
+          <SheetHeader className="pb-2">
+            <SheetTitle className="text-base font-['Space_Grotesk'] text-left flex items-center gap-2">
+              <MapPin className="h-4 w-4 text-primary" />
+              {loc.name}
+            </SheetTitle>
+          </SheetHeader>
+          <Separator className="mb-2" />
+          <div className="space-y-1">
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-3 h-14 text-base rounded-xl text-[hsl(var(--gal-danger))] hover:text-[hsl(var(--gal-danger))] hover:bg-[hsl(var(--gal-danger))]/10"
+              onClick={() => setDeleteDialogOpen(true)}
+              data-testid="folder-menu-delete"
+            >
+              <Trash2 className="h-5 w-5" />
+              Șterge folderul
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent className="mx-4 rounded-2xl max-w-[calc(100vw-32px)]">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-['Space_Grotesk']">Șterge folderul?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Folderul „{loc.name}" va fi șters. Rapoartele din acest folder nu vor fi șterse, dar vor rămâne neasignate.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-0">
+            <AlertDialogCancel className="h-12 rounded-xl" onClick={() => { setDeleteDialogOpen(false); setMenuOpen(false); }}>
+              Anulează
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="h-12 rounded-xl bg-[hsl(var(--gal-danger))] hover:bg-[hsl(var(--gal-danger))]/90 text-white"
+              onClick={handleDelete}
+              disabled={deleting}
+              data-testid="folder-delete-confirm-button"
+            >
+              {deleting ? 'Se șterge...' : 'Șterge definitiv'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
 
 export default function LocalitiesDrawer({ open, onClose, localities, onSelectLocality, onLocalitiesChanged }) {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -98,25 +237,11 @@ export default function LocalitiesDrawer({ open, onClose, localities, onSelectLo
                 </div>
               ) : (
                 localities.map((loc) => (
-                  <button
+                  <FolderItem
                     key={loc.name}
-                    onClick={() => onSelectLocality(loc.name)}
-                    className="w-full flex items-center justify-between p-4 rounded-xl hover:bg-secondary/50 transition-colors"
-                    data-testid="locality-folder-item"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-xl bg-accent flex items-center justify-center">
-                        <MapPin className="h-5 w-5 text-accent-foreground" />
-                      </div>
-                      <div className="text-left">
-                        <p className="font-medium">{loc.name}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="secondary" className="text-xs">{loc.count || 0}</Badge>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                  </button>
+                    loc={{ ...loc, onDeleted: onLocalitiesChanged }}
+                    onSelect={onSelectLocality}
+                  />
                 ))
               )}
             </div>
