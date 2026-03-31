@@ -132,7 +132,17 @@ export default function BrowsePage({ backendUrl, localities }) {
       ) : (
         <div className="space-y-3">
           {meetings.map((meeting) => (
-            <MeetingCard key={meeting._id} meeting={meeting} />
+            <MeetingCard
+              key={meeting._id}
+              meeting={meeting}
+              onDeleted={(id) => {
+                setMeetings(prev => prev.filter(m => m._id !== id));
+                setTotal(prev => prev - 1);
+              }}
+              onUpdated={(updated) => {
+                setMeetings(prev => prev.map(m => m._id === updated._id ? updated : m));
+              }}
+            />
           ))}
         </div>
       )}

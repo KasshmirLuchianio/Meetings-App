@@ -98,7 +98,17 @@ export default function HomePage({ backendUrl, onMeetingCreated }) {
         ) : (
           <div className="space-y-3">
             {recentMeetings.map((meeting) => (
-              <MeetingCard key={meeting._id} meeting={meeting} />
+              <MeetingCard
+                key={meeting._id}
+                meeting={meeting}
+                onDeleted={(id) => {
+                  setRecentMeetings(prev => prev.filter(m => m._id !== id));
+                  if (onMeetingCreated) onMeetingCreated(); // refresh localities
+                }}
+                onUpdated={(updated) => {
+                  setRecentMeetings(prev => prev.map(m => m._id === updated._id ? updated : m));
+                }}
+              />
             ))}
           </div>
         )}
