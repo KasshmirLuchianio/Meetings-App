@@ -742,19 +742,21 @@ async def list_localities():
     
     # Count meetings per locality
     pipeline = [
-        {"$match": {"locality": {"$ne": None, "$ne": ""}}},
+        {"$match": {"locality": {"$ne": None, "$ne": "", "$exists": True}}},
         {"$group": {"_id": "$locality", "count": {"$sum": 1}}},
         {"$sort": {"_id": 1}}
     ]
     agg_cursor = meetings_col.aggregate(pipeline)
     async for doc in agg_cursor:
         name = doc["_id"]
+        if not name:
+            continue
         if name in all_localities:
             all_localities[name]["count"] = doc["count"]
         else:
             all_localities[name] = {"name": name, "count": doc["count"], "is_default": False}
     
-    localities = sorted(all_localities.values(), key=lambda x: x["name"])
+    localities = sorted(all_localities.values(), key=lambda x: x["name"] or "")
     return {"localities": localities}
 
 
@@ -815,10 +817,7 @@ async def rename_locality(locality_name: str, data: LocalityRename):
 @app.delete("/api/localities/{locality_name}")
 async def delete_locality(locality_name: str):
     """Delete a locality folder (meetings stay but lose locality)."""
-    existing = await localities_col.find_one({"name": locality_name})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Localitatea nu a fost găsită")
-    
+    # Delete from localities collection if exists
     await localities_col.delete_one({"name": locality_name})
     
     # Set meetings locality to null

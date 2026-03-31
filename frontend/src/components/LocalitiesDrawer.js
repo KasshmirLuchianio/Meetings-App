@@ -20,7 +20,7 @@ import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 
-function FolderItem({ loc, onSelect }) {
+function FolderItem({ name, count, onSelect, onFolderDeleted }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -31,7 +31,6 @@ function FolderItem({ loc, onSelect }) {
     touchMoved.current = false;
     longPressTimer.current = setTimeout(() => {
       if (!touchMoved.current) {
-        e.preventDefault?.();
         setMenuOpen(true);
       }
     }, 500);
@@ -54,27 +53,30 @@ function FolderItem({ loc, onSelect }) {
 
   const handleContextMenu = useCallback((e) => {
     e.preventDefault();
+    e.stopPropagation();
     setMenuOpen(true);
   }, []);
 
   const handleClick = useCallback(() => {
-    if (!menuOpen && !touchMoved.current) {
-      onSelect(loc.name);
+    if (!touchMoved.current) {
+      onSelect(name);
     }
-  }, [menuOpen, onSelect, loc.name]);
+  }, [onSelect, name]);
 
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/localities/${encodeURIComponent(loc.name)}`, {
+      const res = await fetch(`${BACKEND_URL}/api/localities/${encodeURIComponent(name)}`, {
         method: 'DELETE'
       });
-      if (!res.ok) throw new Error('Eroare la ștergere');
-      toast.success(`Folder "${loc.name}" șters`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Eroare la ștergere');
+      }
+      toast.success(`Folder „${name}" șters`);
       setDeleteDialogOpen(false);
       setMenuOpen(false);
-      // Trigger parent refresh
-      if (loc.onDeleted) loc.onDeleted();
+      if (onFolderDeleted) onFolderDeleted();
     } catch (err) {
       toast.error('Nu s-a putut șterge: ' + err.message);
     } finally {
@@ -98,50 +100,52 @@ function FolderItem({ loc, onSelect }) {
             <MapPin className="h-5 w-5 text-accent-foreground" />
           </div>
           <div className="text-left">
-            <p className="font-medium">{loc.name}</p>
+            <p className="font-medium">{name}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="secondary" className="text-xs">{loc.count || 0}</Badge>
+          <Badge variant="secondary" className="text-xs">{count || 0}</Badge>
           <ChevronRight className="h-4 w-4 text-muted-foreground" />
         </div>
       </button>
 
-      {/* Long-press action menu */}
+      {/* Long-press bottom sheet menu */}
       <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
         <SheetContent side="bottom" className="rounded-t-2xl pb-8">
           <SheetHeader className="pb-2">
             <SheetTitle className="text-base font-['Space_Grotesk'] text-left flex items-center gap-2">
               <MapPin className="h-4 w-4 text-primary" />
-              {loc.name}
+              {name}
             </SheetTitle>
           </SheetHeader>
           <Separator className="mb-2" />
-          <div className="space-y-1">
-            <Button
-              variant="ghost"
-              className="w-full justify-start gap-3 h-14 text-base rounded-xl text-[hsl(var(--gal-danger))] hover:text-[hsl(var(--gal-danger))] hover:bg-[hsl(var(--gal-danger))]/10"
-              onClick={() => setDeleteDialogOpen(true)}
-              data-testid="folder-menu-delete"
-            >
-              <Trash2 className="h-5 w-5" />
-              Șterge folderul
-            </Button>
-          </div>
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 h-14 text-base rounded-xl text-[hsl(var(--gal-danger))] hover:text-[hsl(var(--gal-danger))] hover:bg-[hsl(var(--gal-danger))]/10"
+            onClick={() => {
+              setMenuOpen(false);
+              // Small delay to let bottom sheet close before opening dialog
+              setTimeout(() => setDeleteDialogOpen(true), 200);
+            }}
+            data-testid="folder-menu-delete"
+          >
+            <Trash2 className="h-5 w-5" />
+            Șterge folderul
+          </Button>
         </SheetContent>
       </Sheet>
 
-      {/* Delete confirmation */}
+      {/* Delete confirmation dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent className="mx-4 rounded-2xl max-w-[calc(100vw-32px)]">
           <AlertDialogHeader>
             <AlertDialogTitle className="font-['Space_Grotesk']">Șterge folderul?</AlertDialogTitle>
             <AlertDialogDescription>
-              Folderul „{loc.name}" va fi șters. Rapoartele din acest folder nu vor fi șterse, dar vor rămâne neasignate.
+              Folderul „{name}" va fi șters. Rapoartele din acest folder nu vor fi șterse, dar vor rămâne neasignate.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2 sm:gap-0">
-            <AlertDialogCancel className="h-12 rounded-xl" onClick={() => { setDeleteDialogOpen(false); setMenuOpen(false); }}>
+            <AlertDialogCancel className="h-12 rounded-xl">
               Anulează
             </AlertDialogCancel>
             <AlertDialogAction
@@ -239,8 +243,10 @@ export default function LocalitiesDrawer({ open, onClose, localities, onSelectLo
                 localities.map((loc) => (
                   <FolderItem
                     key={loc.name}
-                    loc={{ ...loc, onDeleted: onLocalitiesChanged }}
+                    name={loc.name}
+                    count={loc.count}
                     onSelect={onSelectLocality}
+                    onFolderDeleted={onLocalitiesChanged}
                   />
                 ))
               )}
