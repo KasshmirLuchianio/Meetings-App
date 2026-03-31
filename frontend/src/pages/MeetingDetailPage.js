@@ -3,8 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { Checkbox } from '../components/ui/checkbox';
 import { Input } from '../components/ui/input';
 import { Skeleton } from '../components/ui/skeleton';
 import { Separator } from '../components/ui/separator';
@@ -13,7 +11,7 @@ import AudioPlayer from '../components/AudioPlayer';
 import { toast } from 'sonner';
 import {
   MapPin, Calendar, FileDown, FileText, RefreshCw, Loader2,
-  Search, User, Clock, CheckCircle2, Circle, Edit3, Check, X
+  Search, Edit3, Check, X
 } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
@@ -52,19 +50,6 @@ export default function MeetingDetailPage() {
     const interval = setInterval(fetchMeeting, 3000);
     return () => clearInterval(interval);
   }, [meeting, fetchMeeting]);
-
-  const toggleAction = async (actionId) => {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/meetings/${id}/actions/${actionId}`, {
-        method: 'PATCH'
-      });
-      if (!res.ok) throw new Error('Failed');
-      const data = await res.json();
-      setMeeting(data);
-    } catch (err) {
-      toast.error('Eroare la actualizarea acțiunii');
-    }
-  };
 
   const handleRegenerate = async () => {
     setRegenerating(true);
@@ -264,123 +249,104 @@ export default function MeetingDetailPage() {
         </Card>
       )}
 
-      {/* Tabs: Rezumat / Acțiuni / Transcriere */}
+      {/* GAL Report Structure - Replace Tabs */}
       {meeting.status === 'done' && (
-        <Tabs defaultValue="summary" className="w-full" data-testid="meeting-detail-tabs">
-          <TabsList className="w-full grid grid-cols-3 h-12 rounded-xl">
-            <TabsTrigger value="summary" className="rounded-lg text-sm">Rezumat</TabsTrigger>
-            <TabsTrigger value="actions" className="rounded-lg text-sm">Acțiuni</TabsTrigger>
-            <TabsTrigger value="transcript" className="rounded-lg text-sm">Transcriere</TabsTrigger>
-          </TabsList>
-
-          {/* Summary Tab */}
-          <TabsContent value="summary" className="mt-4 space-y-4">
-            {meeting.summary && meeting.summary.length > 0 && (
-              <Card className="p-4 rounded-2xl">
-                <h3 className="font-semibold text-sm mb-3 flex items-center gap-2 font-semibold">
-                  <CheckCircle2 className="h-4 w-4 text-primary" />
-                  Rezumat
-                </h3>
-                <ul className="space-y-2">
-                  {meeting.summary.map((item, i) => (
-                    <li key={i} className="flex gap-2 text-sm">
-                      <span className="text-primary mt-0.5 shrink-0">•</span>
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </Card>
-            )}
-
-            {meeting.key_points && meeting.key_points.length > 0 && (
-              <Card className="p-4 rounded-2xl">
-                <h3 className="font-semibold text-sm mb-3 flex items-center gap-2 font-semibold">
-                  <Circle className="h-4 w-4 text-[hsl(var(--gal-warning))]" />
-                  Puncte cheie
-                </h3>
-                <ul className="space-y-2">
-                  {meeting.key_points.map((item, i) => (
-                    <li key={i} className="flex gap-2 text-sm">
-                      <span className="text-[hsl(var(--gal-warning))] mt-0.5 shrink-0">•</span>
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </Card>
-            )}
-          </TabsContent>
-
-          {/* Actions Tab */}
-          <TabsContent value="actions" className="mt-4">
-            <Card className="p-4 rounded-2xl" data-testid="meeting-action-items-list">
-              <h3 className="font-semibold text-sm mb-3 font-semibold">
-                Acțiuni ({meeting.actions?.length || 0})
-              </h3>
-              {meeting.actions && meeting.actions.length > 0 ? (
-                <div className="space-y-3">
-                  {meeting.actions.map((action) => (
-                    <div
-                      key={action.id}
-                      className={`flex items-start gap-3 p-3 rounded-xl transition-colors ${
-                        action.completed ? 'bg-[hsl(var(--gal-success))]/5' : 'bg-secondary/30'
-                      }`}
-                    >
-                      <Checkbox
-                        checked={action.completed}
-                        onCheckedChange={() => toggleAction(action.id)}
-                        className="mt-0.5 h-5 w-5"
-                        data-testid={`action-checkbox-${action.id}`}
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-sm ${action.completed ? 'line-through text-muted-foreground' : ''}`}>
-                          {action.text}
-                        </p>
-                        <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                          {action.owner && (
-                            <span className="text-xs text-muted-foreground flex items-center gap-1">
-                              <User className="h-3 w-3" />
-                              {action.owner}
-                            </span>
-                          )}
-                          {action.deadline && (
-                            <span className="text-xs text-muted-foreground flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              {action.deadline}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">Nicio acțiune identificată.</p>
-              )}
-            </Card>
-          </TabsContent>
-
-          {/* Transcript Tab */}
-          <TabsContent value="transcript" className="mt-4 space-y-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Caută în transcriere..."
-                value={transcriptSearch}
-                onChange={(e) => setTranscriptSearch(e.target.value)}
-                className="pl-10 h-10 rounded-xl"
-                data-testid="transcript-search-input"
-              />
-            </div>
+        <div className="space-y-3">
+          {/* Data desfășurare */}
+          {meeting.data_desfasurare && (
             <Card className="p-4 rounded-2xl">
+              <h3 className="font-semibold text-xs uppercase text-muted-foreground mb-2">Data desfășurare</h3>
+              <p className="text-sm">{meeting.data_desfasurare}</p>
+            </Card>
+          )}
+
+          {/* Format întâlnire */}
+          {meeting.format_intalnire && (
+            <Card className="p-4 rounded-2xl">
+              <h3 className="font-semibold text-xs uppercase text-muted-foreground mb-2">Format întâlnire</h3>
+              <p className="text-sm">{meeting.format_intalnire}</p>
+            </Card>
+          )}
+
+          {/* Loc desfășurare */}
+          {meeting.loc_desfasurare && (
+            <Card className="p-4 rounded-2xl">
+              <h3 className="font-semibold text-xs uppercase text-muted-foreground mb-2">Loc desfășurare</h3>
+              <p className="text-sm">{meeting.loc_desfasurare}</p>
+            </Card>
+          )}
+
+          {/* Mod promovare */}
+          {meeting.mod_promovare && (
+            <Card className="p-4 rounded-2xl">
+              <h3 className="font-semibold text-xs uppercase text-muted-foreground mb-2">Mod promovare</h3>
+              <p className="text-sm">{meeting.mod_promovare}</p>
+            </Card>
+          )}
+
+          {/* Obiectiv */}
+          {meeting.obiectiv && (
+            <Card className="p-4 rounded-2xl">
+              <h3 className="font-semibold text-xs uppercase text-muted-foreground mb-2">Obiectiv</h3>
+              <p className="text-sm leading-relaxed">{meeting.obiectiv}</p>
+            </Card>
+          )}
+
+          {/* Tematica */}
+          {meeting.tematica && (
+            <Card className="p-4 rounded-2xl">
+              <h3 className="font-semibold text-xs uppercase text-muted-foreground mb-2">Tematica</h3>
+              <p className="text-sm leading-relaxed">{meeting.tematica}</p>
+            </Card>
+          )}
+
+          {/* Scurtă descriere */}
+          {meeting.scurta_descriere && (
+            <Card className="p-4 rounded-2xl">
+              <h3 className="font-semibold text-xs uppercase text-muted-foreground mb-2">Scurtă descriere</h3>
+              <p className="text-sm leading-relaxed">{meeting.scurta_descriere}</p>
+            </Card>
+          )}
+
+          {/* Număr participanți */}
+          {meeting.numar_participanti && (
+            <Card className="p-4 rounded-2xl">
+              <h3 className="font-semibold text-xs uppercase text-muted-foreground mb-2">Număr participanți</h3>
+              <p className="text-sm">{meeting.numar_participanti}</p>
+            </Card>
+          )}
+
+          {/* Concluzia */}
+          {meeting.concluzia && (
+            <Card className="p-4 rounded-2xl">
+              <h3 className="font-semibold text-xs uppercase text-muted-foreground mb-2">Concluzia</h3>
+              <p className="text-sm leading-relaxed">{meeting.concluzia}</p>
+            </Card>
+          )}
+
+          {/* Transcriere - Always show if available */}
+          {meeting.transcript && (
+            <Card className="p-4 rounded-2xl mt-6">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-sm">Transcriere completă</h3>
+              </div>
+              <div className="relative mb-3">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Caută în transcriere..."
+                  value={transcriptSearch}
+                  onChange={(e) => setTranscriptSearch(e.target.value)}
+                  className="pl-10 h-10 rounded-xl"
+                  data-testid="transcript-search-input"
+                />
+              </div>
+              <Separator className="mb-3" />
               <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                {meeting.transcript 
-                  ? highlightText(meeting.transcript, transcriptSearch)
-                  : 'Transcrierea nu este disponibilă.'
-                }
+                {highlightText(meeting.transcript, transcriptSearch)}
               </p>
             </Card>
-          </TabsContent>
-        </Tabs>
+          )}
+        </div>
       )}
 
       {/* Audio Player */}

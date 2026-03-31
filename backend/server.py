@@ -153,7 +153,7 @@ async def extract_meeting_data(transcript: str) -> dict:
     """Extract structured data from transcript using Claude."""
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     
-    system_prompt = """Ești un asistent care extrage informații structurate din transcrierile ședințelor în limba română.
+    system_prompt = """Ești un asistent care extrage informații structurate din transcrierile ședințelor GAL în limba română.
 
 REGULI:
 - NU inventa informații care nu sunt în transcriere
@@ -171,19 +171,18 @@ LOCALITĂȚI CUNOSCUTE (verifică dacă apare vreuna în transcriere):
 
 Dacă în transcriere apare una din aceste localități (sau variații ale numelui), folosește exact numele din lista de mai sus.
 
-FORMAT OUTPUT (JSON strict):
+FORMAT OUTPUT (JSON strict - structura raport GAL):
 {
-  "title": "Titlul scurt al ședinței",
   "locality": "Numele localității principale din lista de mai sus sau null dacă nu apare niciuna",
-  "summary": ["punct 1", "punct 2"],
-  "key_points": ["punct cheie 1", "punct cheie 2"],
-  "actions": [
-    {
-      "text": "Descrierea acțiunii",
-      "owner": "Persoana responsabilă sau null",
-      "deadline": "Termenul limită sau null"
-    }
-  ]
+  "data_desfasurare": "Data menționată în ședință sau null (format: DD.MM.YYYY)",
+  "format_intalnire": "Tipul întâlnirii: fizică/online/hibrid sau null",
+  "loc_desfasurare": "Locul exact unde s-a desfășurat (ex: Primărie, Cămin Cultural) sau null",
+  "mod_promovare": "Cum a fost promovată întâlnirea (ex: afișe, Facebook, email) sau null",
+  "obiectiv": "Obiectivul principal al ședinței în 1-2 propoziții sau null",
+  "tematica": "Tema principală discutată în 1-2 propoziții sau null",
+  "scurta_descriere": "Rezumat scurt al discuțiilor în 2-4 propoziții sau null",
+  "numar_participanti": "Numărul de participanți menționat sau null",
+  "concluzia": "Concluzia principală sau următorii pași în 1-2 propoziții sau null"
 }"""
     
     session_id = f"extract-{uuid.uuid4()}"
@@ -252,32 +251,32 @@ async def process_meeting(meeting_id: str):
             }}
         )
         
-        # Step 2: Extract structured data
+        # Step 2: Extract structured data (GAL format)
         print(f"[GAL] Extracting data for meeting {meeting_id}...")
         extracted = await extract_meeting_data(transcription["text"])
         
-        # Build action items with IDs
-        actions = []
-        for action in extracted.get("actions", []):
-            actions.append({
-                "id": str(uuid.uuid4()),
-                "text": action.get("text", ""),
-                "owner": action.get("owner"),
-                "deadline": action.get("deadline"),
-                "completed": False
-            })
-        
         # Determine locality
         locality = extracted.get("locality") or "Necunoscut"
-        title = extracted.get("title") or meeting.get("title") or "Ședință fără titlu"
         
-        # Update meeting with all extracted data
+        # Generate title: DD.MM.YYYY | Localitatea
+        created_at = meeting.get("created_at", datetime.now(timezone.utc))
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        title = f"{created_at.strftime('%d.%m.%Y')} | {locality}"
+        
+        # Update meeting with GAL structured data
         update_data = {
             "title": title,
             "locality": locality,
-            "summary": extracted.get("summary", []),
-            "key_points": extracted.get("key_points", []),
-            "actions": actions,
+            "data_desfasurare": extracted.get("data_desfasurare"),
+            "format_intalnire": extracted.get("format_intalnire"),
+            "loc_desfasurare": extracted.get("loc_desfasurare"),
+            "mod_promovare": extracted.get("mod_promovare"),
+            "obiectiv": extracted.get("obiectiv"),
+            "tematica": extracted.get("tematica"),
+            "scurta_descriere": extracted.get("scurta_descriere"),
+            "numar_participanti": extracted.get("numar_participanti"),
+            "concluzia": extracted.get("concluzia"),
             "status": "done",
             "error": None,
             "updated_at": datetime.now(timezone.utc)
@@ -333,9 +332,16 @@ async def create_meeting(data: MeetingCreate = None):
         "audio_url": None,
         "transcript": None,
         "segments": [],
-        "summary": [],
-        "key_points": [],
-        "actions": [],
+        # GAL report fields
+        "data_desfasurare": None,
+        "format_intalnire": None,
+        "loc_desfasurare": None,
+        "mod_promovare": None,
+        "obiectiv": None,
+        "tematica": None,
+        "scurta_descriere": None,
+        "numar_participanti": None,
+        "concluzia": None,
         "status": "pending",
         "error": None,
         "duration": 0,
@@ -682,27 +688,29 @@ async def reprocess_transcript(meeting_id: str):
         
         extracted = await extract_meeting_data(meeting["transcript"])
         
-        actions = []
-        for action in extracted.get("actions", []):
-            actions.append({
-                "id": str(uuid.uuid4()),
-                "text": action.get("text", ""),
-                "owner": action.get("owner"),
-                "deadline": action.get("deadline"),
-                "completed": False
-            })
-        
+        # Determine locality
         locality = extracted.get("locality") or meeting.get("locality") or "Necunoscut"
-        title = extracted.get("title") or meeting.get("title") or "Ședință fără titlu"
+        
+        # Generate title: DD.MM.YYYY | Localitatea
+        created_at = meeting.get("created_at", datetime.now(timezone.utc))
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        title = f"{created_at.strftime('%d.%m.%Y')} | {locality}"
         
         await meetings_col.update_one(
             {"_id": ObjectId(meeting_id)},
             {"$set": {
                 "title": title,
                 "locality": locality,
-                "summary": extracted.get("summary", []),
-                "key_points": extracted.get("key_points", []),
-                "actions": actions,
+                "data_desfasurare": extracted.get("data_desfasurare"),
+                "format_intalnire": extracted.get("format_intalnire"),
+                "loc_desfasurare": extracted.get("loc_desfasurare"),
+                "mod_promovare": extracted.get("mod_promovare"),
+                "obiectiv": extracted.get("obiectiv"),
+                "tematica": extracted.get("tematica"),
+                "scurta_descriere": extracted.get("scurta_descriere"),
+                "numar_participanti": extracted.get("numar_participanti"),
+                "concluzia": extracted.get("concluzia"),
                 "status": "done",
                 "error": None,
                 "updated_at": datetime.now(timezone.utc)
