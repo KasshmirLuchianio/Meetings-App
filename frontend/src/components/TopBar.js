@@ -40,7 +40,7 @@ export default function TopBar({ theme, onToggleTheme, onOpenDrawer, isOnline })
               <Menu className="h-5 w-5" />
             </Button>
           )}
-          <h1 className="text-lg font-semibold font-['Space_Grotesk'] truncate">{getTitle()}</h1>
+          <h1 className="text-lg font-semibold font-semibold truncate">{getTitle()}</h1>
         </div>
 
         <div className="flex items-center gap-1">

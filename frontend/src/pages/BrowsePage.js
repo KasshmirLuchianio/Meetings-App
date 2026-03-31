@@ -173,7 +173,7 @@ export default function BrowsePage({ backendUrl, localities }) {
       <AlertDialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
         <AlertDialogContent className="mx-4 rounded-2xl max-w-[calc(100vw-32px)]">
           <AlertDialogHeader>
-            <AlertDialogTitle className="font-['Space_Grotesk']">Redenumește folderul</AlertDialogTitle>
+            <AlertDialogTitle className="font-semibold">Redenumește folderul</AlertDialogTitle>
             <AlertDialogDescription>
               Introduceți noul nume pentru folderul „{activeLocality}”. Toate rapoartele din acest folder vor fi actualizate.
             </AlertDialogDescription>

@@ -113,7 +113,7 @@ function FolderItem({ name, count, onSelect, onFolderDeleted }) {
       <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
         <SheetContent side="bottom" className="rounded-t-2xl pb-8">
           <SheetHeader className="pb-2">
-            <SheetTitle className="text-base font-['Space_Grotesk'] text-left flex items-center gap-2">
+            <SheetTitle className="text-base font-semibold text-left flex items-center gap-2">
               <MapPin className="h-4 w-4 text-primary" />
               {name}
             </SheetTitle>
@@ -139,7 +139,7 @@ function FolderItem({ name, count, onSelect, onFolderDeleted }) {
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent className="mx-4 rounded-2xl max-w-[calc(100vw-32px)]">
           <AlertDialogHeader>
-            <AlertDialogTitle className="font-['Space_Grotesk']">Șterge folderul?</AlertDialogTitle>
+            <AlertDialogTitle className="font-semibold">Șterge folderul?</AlertDialogTitle>
             <AlertDialogDescription>
               Folderul „{name}" va fi șters. Rapoartele din acest folder nu vor fi șterse, dar vor rămâne neasignate.
             </AlertDialogDescription>
@@ -202,7 +202,7 @@ export default function LocalitiesDrawer({ open, onClose, localities, onSelectLo
       <Sheet open={open} onOpenChange={onClose}>
         <SheetContent side="left" className="w-[300px] sm:w-[340px] p-0">
           <SheetHeader className="px-4 pt-6 pb-4">
-            <SheetTitle className="text-xl font-['Space_Grotesk'] flex items-center gap-2">
+            <SheetTitle className="text-xl font-semibold flex items-center gap-2">
               <MapPin className="h-5 w-5 text-primary" />
               Localități
             </SheetTitle>
@@ -275,7 +275,7 @@ export default function LocalitiesDrawer({ open, onClose, localities, onSelectLo
       <AlertDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <AlertDialogContent className="mx-4 rounded-2xl max-w-[calc(100vw-32px)]">
           <AlertDialogHeader>
-            <AlertDialogTitle className="font-['Space_Grotesk']">Folder nou</AlertDialogTitle>
+            <AlertDialogTitle className="font-semibold">Folder nou</AlertDialogTitle>
             <AlertDialogDescription>
               Introduceți numele localității pentru noul folder.
             </AlertDialogDescription>

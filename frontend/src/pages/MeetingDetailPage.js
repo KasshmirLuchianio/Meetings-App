@@ -162,7 +162,7 @@ export default function MeetingDetailPage() {
       {/* Header */}
       <div>
         <div className="flex items-start justify-between gap-2">
-          <h1 className="text-xl font-bold font-['Space_Grotesk'] leading-tight">
+          <h1 className="text-xl font-bold font-semibold leading-tight">
             {meeting.title || 'Ședință fără titlu'}
           </h1>
           <StatusBadge status={meeting.status} />
@@ -277,7 +277,7 @@ export default function MeetingDetailPage() {
           <TabsContent value="summary" className="mt-4 space-y-4">
             {meeting.summary && meeting.summary.length > 0 && (
               <Card className="p-4 rounded-2xl">
-                <h3 className="font-semibold text-sm mb-3 flex items-center gap-2 font-['Space_Grotesk']">
+                <h3 className="font-semibold text-sm mb-3 flex items-center gap-2 font-semibold">
                   <CheckCircle2 className="h-4 w-4 text-primary" />
                   Rezumat
                 </h3>
@@ -294,7 +294,7 @@ export default function MeetingDetailPage() {
 
             {meeting.key_points && meeting.key_points.length > 0 && (
               <Card className="p-4 rounded-2xl">
-                <h3 className="font-semibold text-sm mb-3 flex items-center gap-2 font-['Space_Grotesk']">
+                <h3 className="font-semibold text-sm mb-3 flex items-center gap-2 font-semibold">
                   <Circle className="h-4 w-4 text-[hsl(var(--gal-warning))]" />
                   Puncte cheie
                 </h3>
@@ -313,7 +313,7 @@ export default function MeetingDetailPage() {
           {/* Actions Tab */}
           <TabsContent value="actions" className="mt-4">
             <Card className="p-4 rounded-2xl" data-testid="meeting-action-items-list">
-              <h3 className="font-semibold text-sm mb-3 font-['Space_Grotesk']">
+              <h3 className="font-semibold text-sm mb-3 font-semibold">
                 Acțiuni ({meeting.actions?.length || 0})
               </h3>
               {meeting.actions && meeting.actions.length > 0 ? (

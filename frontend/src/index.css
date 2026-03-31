@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=Roboto+Mono:wght@500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -90,7 +90,8 @@
     -moz-osx-font-smoothing: grayscale;
   }
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Space Grotesk', Inter, system-ui;
+    font-family: Inter, system-ui;
+    font-weight: 600;
   }
 }
 
@@ -168,7 +169,7 @@ body {
 
 /* Mono font for timer */
 .font-mono-timer {
-  font-family: 'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 /* Waveform bars animation */
@@ -206,13 +207,44 @@ body {
   animation: status-pulse 2s ease-in-out infinite;
 }
 
-/* Smooth page transitions */
-.page-enter {
-  opacity: 0;
-  transform: translateY(8px);
+/* === CSS-only animations (zero JS cost) === */
+
+/* Page transition */
+.page-transition {
+  animation: pageIn 0.2s cubic-bezier(0.25, 0.1, 0.25, 1) both;
 }
-.page-enter-active {
-  opacity: 1;
-  transform: translateY(0);
-  transition: opacity 200ms ease-out, transform 200ms ease-out;
+
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Fade-in sections */
+.fade-in {
+  animation: fadeIn 0.25s cubic-bezier(0.25, 0.1, 0.25, 1) both;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Staggered list items */
+.animated-list .animated-item {
+  animation: listItemIn 0.2s cubic-bezier(0.25, 0.1, 0.25, 1) both;
+}
+
+.animated-list .animated-item:nth-child(1) { animation-delay: 0.02s; }
+.animated-list .animated-item:nth-child(2) { animation-delay: 0.06s; }
+.animated-list .animated-item:nth-child(3) { animation-delay: 0.10s; }
+.animated-list .animated-item:nth-child(4) { animation-delay: 0.14s; }
+.animated-list .animated-item:nth-child(5) { animation-delay: 0.18s; }
+.animated-list .animated-item:nth-child(6) { animation-delay: 0.22s; }
+.animated-list .animated-item:nth-child(7) { animation-delay: 0.26s; }
+.animated-list .animated-item:nth-child(8) { animation-delay: 0.30s; }
+.animated-list .animated-item:nth-child(n+9) { animation-delay: 0.34s; }
+
+@keyframes listItemIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }

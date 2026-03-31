@@ -13,7 +13,6 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from './ui/sheet';
 import { Separator } from './ui/separator';
 import { toast } from 'sonner';
-import { motion } from 'framer-motion';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -106,7 +105,7 @@ export default function MeetingCard({ meeting, onDeleted, onUpdated }) {
       >
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-base truncate font-['Space_Grotesk']">
+            <h3 className="font-semibold text-base truncate font-semibold">
               {meeting.title || 'Ședință fără titlu'}
             </h3>
             <div className="flex items-center gap-2 mt-1.5">
@@ -130,7 +129,7 @@ export default function MeetingCard({ meeting, onDeleted, onUpdated }) {
       <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
         <SheetContent side="bottom" className="rounded-t-2xl pb-8">
           <SheetHeader className="pb-2">
-            <SheetTitle className="text-base font-['Space_Grotesk'] truncate text-left">
+            <SheetTitle className="text-base font-semibold truncate text-left">
               {meeting.title || 'Ședință fără titlu'}
             </SheetTitle>
           </SheetHeader>
@@ -159,7 +158,7 @@ export default function MeetingCard({ meeting, onDeleted, onUpdated }) {
       <AlertDialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <AlertDialogContent className="mx-4 rounded-2xl max-w-[calc(100vw-32px)]">
           <AlertDialogHeader>
-            <AlertDialogTitle className="font-['Space_Grotesk']">Editare nume</AlertDialogTitle>
+            <AlertDialogTitle className="font-semibold">Editare nume</AlertDialogTitle>
             <AlertDialogDescription>Introduceți noul titlu al întâlnirii.</AlertDialogDescription>
           </AlertDialogHeader>
           <Input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Titlu întâlnire..."
@@ -178,7 +177,7 @@ export default function MeetingCard({ meeting, onDeleted, onUpdated }) {
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent className="mx-4 rounded-2xl max-w-[calc(100vw-32px)]">
           <AlertDialogHeader>
-            <AlertDialogTitle className="font-['Space_Grotesk']">Șterge întâlnirea?</AlertDialogTitle>
+            <AlertDialogTitle className="font-semibold">Șterge întâlnirea?</AlertDialogTitle>
             <AlertDialogDescription>
               Această acțiune este ireversibilă. Întâlnirea, transcrierea și toate datele asociate vor fi șterse definitiv.
             </AlertDialogDescription>

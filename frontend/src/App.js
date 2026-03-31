@@ -1,17 +1,25 @@
 import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { Toaster, toast } from 'sonner';
-import { AnimatePresence } from 'framer-motion';
 import TopBar from './components/TopBar';
 import LocalitiesDrawer from './components/LocalitiesDrawer';
-import PageTransition from './components/PageTransition';
-import HomePage from './pages/HomePage';
-import BrowsePage from './pages/BrowsePage';
-import CalendarPage from './pages/CalendarPage';
-import MeetingDetailPage from './pages/MeetingDetailPage';
 import './App.css';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+
+// Lazy load pages for faster initial load
+const HomePage = lazy(() => import('./pages/HomePage'));
+const BrowsePage = lazy(() => import('./pages/BrowsePage'));
+const CalendarPage = lazy(() => import('./pages/CalendarPage'));
+const MeetingDetailPage = lazy(() => import('./pages/MeetingDetailPage'));
+
+function PageLoader() {
+  return (
+    <div className="px-4 py-8 flex justify-center">
+      <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+}
 
 function AppContent() {
   const [theme, setTheme] = useState(() => localStorage.getItem('gal-theme') || 'light');
@@ -19,7 +27,6 @@ function AppContent() {
   const [localities, setLocalities] = useState([]);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const navigate = useNavigate();
-  const location = useLocation();
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -27,8 +34,8 @@ function AppContent() {
   }, [theme]);
 
   useEffect(() => {
-    const handleOnline = () => { setIsOnline(true); toast.success('Online \u2014 sincronizat'); };
-    const handleOffline = () => { setIsOnline(false); toast.warning('Offline \u2014 salvat local'); };
+    const handleOnline = () => { setIsOnline(true); toast.success('Online — sincronizat'); };
+    const handleOffline = () => { setIsOnline(false); toast.warning('Offline — salvat local'); };
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
@@ -66,7 +73,7 @@ function AppContent() {
           className="sticky top-[56px] z-30 px-4 py-2 text-sm bg-[hsl(var(--gal-offline))]/10 text-[hsl(var(--gal-offline))] border-b border-[hsl(var(--gal-offline))]/20 flex items-center gap-2"
         >
           <div className="w-2 h-2 rounded-full bg-[hsl(var(--gal-offline))] animate-status-pulse" />
-          Offline \u2014 salvat local
+          Offline — salvat local
         </div>
       )}
 
@@ -86,30 +93,14 @@ function AppContent() {
       />
 
       <main className="mx-auto w-full max-w-md md:max-w-2xl">
-        <AnimatePresence mode="wait" initial={false}>
-          <Routes location={location} key={location.pathname}>
-            <Route path="/" element={
-              <PageTransition>
-                <HomePage backendUrl={BACKEND_URL} onMeetingCreated={fetchLocalities} />
-              </PageTransition>
-            } />
-            <Route path="/browse" element={
-              <PageTransition>
-                <BrowsePage backendUrl={BACKEND_URL} localities={localities} />
-              </PageTransition>
-            } />
-            <Route path="/calendar" element={
-              <PageTransition>
-                <CalendarPage />
-              </PageTransition>
-            } />
-            <Route path="/meeting/:id" element={
-              <PageTransition>
-                <MeetingDetailPage backendUrl={BACKEND_URL} />
-              </PageTransition>
-            } />
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/" element={<HomePage backendUrl={BACKEND_URL} onMeetingCreated={fetchLocalities} />} />
+            <Route path="/browse" element={<BrowsePage backendUrl={BACKEND_URL} localities={localities} />} />
+            <Route path="/calendar" element={<CalendarPage />} />
+            <Route path="/meeting/:id" element={<MeetingDetailPage backendUrl={BACKEND_URL} />} />
           </Routes>
-        </AnimatePresence>
+        </Suspense>
       </main>
 
       <Toaster position="top-center" richColors toastOptions={{ duration: 2000 }} />

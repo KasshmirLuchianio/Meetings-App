@@ -118,7 +118,7 @@ export default function CalendarPage() {
       <Card className="rounded-2xl shadow-[0_6px_18px_hsl(var(--gal-shadow))] overflow-hidden" data-testid="meetings-calendar">
         <div className="px-4 pt-4 pb-2 flex items-center gap-2">
           <CalendarDays className="h-5 w-5 text-primary" />
-          <h2 className="text-base font-semibold font-['Space_Grotesk']">
+          <h2 className="text-base font-semibold font-semibold">
             Calendar rapoarte
           </h2>
         </div>
@@ -176,7 +176,7 @@ export default function CalendarPage() {
       {/* Meetings for selected date */}
       <FadeIn delay={0.1}>
       <div>
-        <h2 className="text-base font-semibold font-['Space_Grotesk'] mb-3">
+        <h2 className="text-base font-semibold font-semibold mb-3">
           Rapoarte — {selectedDate ? selectedDate.toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' }) : 'azi'}
         </h2>
 
