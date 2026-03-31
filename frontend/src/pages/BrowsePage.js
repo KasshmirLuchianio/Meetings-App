@@ -5,8 +5,20 @@ import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Skeleton } from '../components/ui/skeleton';
-import { ScrollArea } from '../components/ui/scroll-area';
-import { Search, MapPin, Filter, FileAudio, X } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../components/ui/alert-dialog';
+import { Search, MapPin, Filter, FileAudio, X, Pencil } from 'lucide-react';
+import { toast } from 'sonner';
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 export default function BrowsePage({ backendUrl, localities }) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -15,6 +27,11 @@ export default function BrowsePage({ backendUrl, localities }) {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [total, setTotal] = useState(0);
+
+  // Rename dialog
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [newLocalityName, setNewLocalityName] = useState('');
+  const [renaming, setRenaming] = useState(false);
 
   const fetchMeetings = useCallback(async () => {
     setLoading(true);
@@ -49,6 +66,37 @@ export default function BrowsePage({ backendUrl, localities }) {
 
   const clearLocality = () => {
     setSearchParams({});
+  };
+
+  const handleRenameLocality = async () => {
+    const name = newLocalityName.trim();
+    if (!name || !activeLocality) return;
+
+    setRenaming(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/localities/${encodeURIComponent(activeLocality)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_name: name })
+      });
+      if (res.status === 409) {
+        toast.error('O localitate cu acest nume există deja');
+        return;
+      }
+      if (!res.ok) throw new Error('Eroare la redenumire');
+      
+      const data = await res.json();
+      toast.success(`Folder redenumit: ${activeLocality} → ${name}`);
+      setRenameDialogOpen(false);
+      // Update URL to new locality name
+      setSearchParams({ locality: name });
+      // Refresh meetings
+      fetchMeetings();
+    } catch (err) {
+      toast.error('Nu s-a putut redenumi: ' + err.message);
+    } finally {
+      setRenaming(false);
+    }
   };
 
   return (
@@ -90,18 +138,33 @@ export default function BrowsePage({ backendUrl, localities }) {
             data-testid="locality-chip"
           >
             <MapPin className="h-3 w-3" />
-            {loc.name} ({loc.count})
+            {loc.name} ({loc.count || 0})
           </Badge>
         ))}
       </div>
 
-      {/* Active filter indicator */}
+      {/* Active filter indicator with rename option */}
       {activeLocality && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Filter className="h-4 w-4" />
-          <span>Filtrat: <strong>{activeLocality}</strong></span>
-          <Button variant="ghost" size="icon" onClick={clearLocality} className="h-6 w-6">
-            <X className="h-3 w-3" />
+        <div className="flex items-center justify-between gap-2 bg-secondary/30 p-3 rounded-xl">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Filter className="h-4 w-4" />
+            <span>Folder: <strong className="text-foreground">{activeLocality}</strong></span>
+            <Button variant="ghost" size="icon" onClick={clearLocality} className="h-6 w-6">
+              <X className="h-3 w-3" />
+            </Button>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-xs gap-1 text-primary"
+            onClick={() => {
+              setNewLocalityName(activeLocality);
+              setRenameDialogOpen(true);
+            }}
+            data-testid="rename-locality-button"
+          >
+            <Pencil className="h-3 w-3" />
+            Redenumește
           </Button>
         </div>
       )}
@@ -146,6 +209,40 @@ export default function BrowsePage({ backendUrl, localities }) {
           ))}
         </div>
       )}
+
+      {/* Rename locality dialog */}
+      <AlertDialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+        <AlertDialogContent className="mx-4 rounded-2xl max-w-[calc(100vw-32px)]">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-['Space_Grotesk']">Redenumește folderul</AlertDialogTitle>
+            <AlertDialogDescription>
+              Introduceți noul nume pentru folderul "{activeLocality}". Toate rapoartele din acest folder vor fi actualizate.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input
+            value={newLocalityName}
+            onChange={(e) => setNewLocalityName(e.target.value)}
+            placeholder="Numele nou..."
+            className="h-12 rounded-xl text-base"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleRenameLocality();
+            }}
+            data-testid="rename-locality-input"
+          />
+          <AlertDialogFooter className="gap-2 sm:gap-0">
+            <AlertDialogCancel className="h-12 rounded-xl">Anulează</AlertDialogCancel>
+            <AlertDialogAction
+              className="h-12 rounded-xl bg-primary hover:bg-primary/90"
+              onClick={handleRenameLocality}
+              disabled={renaming || !newLocalityName.trim() || newLocalityName.trim() === activeLocality}
+              data-testid="rename-locality-confirm-button"
+            >
+              {renaming ? 'Se salvează...' : 'Salvează'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

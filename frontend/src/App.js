@@ -86,6 +86,7 @@ function AppContent() {
             navigate('/browse');
           }
         }}
+        onLocalitiesChanged={fetchLocalities}
       />
 
       <main className="mx-auto w-full max-w-md md:max-w-2xl">

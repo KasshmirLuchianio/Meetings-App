@@ -74,9 +74,25 @@ async def ensure_indexes():
     await meetings_col.create_index([("title", "text"), ("transcript", "text"), ("locality", "text")])
 
 
+# Default localities (folders)
+DEFAULT_LOCALITIES = ["Chilia Veche", "Crișan", "C.A.Rosetti", "Maliuc", "Beștepe"]
+
+
+async def seed_default_localities():
+    """Ensure default locality folders exist."""
+    for name in DEFAULT_LOCALITIES:
+        await localities_col.update_one(
+            {"name": name},
+            {"$setOnInsert": {"name": name, "created_at": datetime.now(timezone.utc), "is_default": True}},
+            upsert=True
+        )
+    print(f"[GAL] Default localities seeded: {DEFAULT_LOCALITIES}")
+
+
 @app.on_event("startup")
 async def startup():
     await ensure_indexes()
+    await seed_default_localities()
     print("[GAL] Server started. Indexes ensured.")
 
 
@@ -146,10 +162,19 @@ REGULI:
 - Răspunde DOAR în limba română
 - Returnează DOAR JSON valid, fără alt text sau markdown
 
+LOCALITĂȚI CUNOSCUTE (verifică dacă apare vreuna în transcriere):
+- Chilia Veche
+- Crișan
+- C.A.Rosetti
+- Maliuc
+- Beștepe
+
+Dacă în transcriere apare una din aceste localități (sau variații ale numelui), folosește exact numele din lista de mai sus.
+
 FORMAT OUTPUT (JSON strict):
 {
   "title": "Titlul scurt al ședinței",
-  "locality": "Numele localității principale sau null",
+  "locality": "Numele localității principale din lista de mai sus sau null dacă nu apare niciuna",
   "summary": ["punct 1", "punct 2"],
   "key_points": ["punct cheie 1", "punct cheie 2"],
   "actions": [
@@ -700,24 +725,109 @@ async def reprocess_transcript(meeting_id: str):
 
 # ---- LOCALITIES ----
 
+class LocalityCreate(BaseModel):
+    name: str
+
+class LocalityRename(BaseModel):
+    new_name: str
+
 @app.get("/api/localities")
 async def list_localities():
-    """List all localities with meeting counts."""
-    # Get distinct localities from meetings
+    """List all localities (folders) with meeting counts."""
+    # Get all localities from the localities collection
+    all_localities = {}
+    cursor = localities_col.find({}).sort("name", 1)
+    async for doc in cursor:
+        all_localities[doc["name"]] = {"name": doc["name"], "count": 0, "is_default": doc.get("is_default", False)}
+    
+    # Count meetings per locality
     pipeline = [
         {"$match": {"locality": {"$ne": None, "$ne": ""}}},
         {"$group": {"_id": "$locality", "count": {"$sum": 1}}},
         {"$sort": {"_id": 1}}
     ]
-    cursor = meetings_col.aggregate(pipeline)
-    localities = []
-    async for doc in cursor:
-        localities.append({
-            "name": doc["_id"],
-            "count": doc["count"]
-        })
+    agg_cursor = meetings_col.aggregate(pipeline)
+    async for doc in agg_cursor:
+        name = doc["_id"]
+        if name in all_localities:
+            all_localities[name]["count"] = doc["count"]
+        else:
+            all_localities[name] = {"name": name, "count": doc["count"], "is_default": False}
     
+    localities = sorted(all_localities.values(), key=lambda x: x["name"])
     return {"localities": localities}
+
+
+@app.post("/api/localities")
+async def create_locality(data: LocalityCreate):
+    """Create a new locality folder."""
+    name = data.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Numele localității nu poate fi gol")
+    
+    # Check if exists
+    existing = await localities_col.find_one({"name": name})
+    if existing:
+        raise HTTPException(status_code=409, detail="Localitate deja existentă")
+    
+    await localities_col.insert_one({
+        "name": name,
+        "created_at": datetime.now(timezone.utc),
+        "is_default": False
+    })
+    
+    return {"name": name, "count": 0, "is_default": False}
+
+
+@app.patch("/api/localities/{locality_name}")
+async def rename_locality(locality_name: str, data: LocalityRename):
+    """Rename a locality folder and update all meetings."""
+    new_name = data.new_name.strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Numele nou nu poate fi gol")
+    
+    # Check if source exists
+    existing = await localities_col.find_one({"name": locality_name})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Localitatea nu a fost găsită")
+    
+    # Check if target name already exists
+    if new_name != locality_name:
+        target = await localities_col.find_one({"name": new_name})
+        if target:
+            raise HTTPException(status_code=409, detail="O localitate cu acest nume există deja")
+    
+    # Rename in localities collection
+    await localities_col.update_one(
+        {"name": locality_name},
+        {"$set": {"name": new_name, "updated_at": datetime.now(timezone.utc)}}
+    )
+    
+    # Update all meetings with this locality
+    result = await meetings_col.update_many(
+        {"locality": locality_name},
+        {"$set": {"locality": new_name}}
+    )
+    
+    return {"old_name": locality_name, "new_name": new_name, "meetings_updated": result.modified_count}
+
+
+@app.delete("/api/localities/{locality_name}")
+async def delete_locality(locality_name: str):
+    """Delete a locality folder (meetings stay but lose locality)."""
+    existing = await localities_col.find_one({"name": locality_name})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Localitatea nu a fost găsită")
+    
+    await localities_col.delete_one({"name": locality_name})
+    
+    # Set meetings locality to null
+    await meetings_col.update_many(
+        {"locality": locality_name},
+        {"$set": {"locality": None}}
+    )
+    
+    return {"status": "deleted", "name": locality_name}
 
 
 
