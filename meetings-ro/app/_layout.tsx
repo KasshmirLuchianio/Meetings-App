@@ -1,6 +1,5 @@
 import '../global.css';
-import { Stack } from 'expo-router';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { Drawer } from 'expo-router/drawer';
 import { StatusBar } from 'expo-status-bar';
 import {
   useFonts,
@@ -11,6 +10,8 @@ import {
   DMSans_500Medium,
   DMSans_600SemiBold,
 } from '@expo-google-fonts/dm-sans';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import CustomDrawer from '../src/components/CustomDrawer';
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -25,19 +26,26 @@ export default function RootLayout() {
   }
 
   return (
-    <SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="dark" />
-      <Stack
+      <Drawer
+        drawerContent={(props) => <CustomDrawer {...props} />}
         screenOptions={{
           headerShown: false,
-          animation: 'slide_from_right',
+          drawerType: 'slide',
+          drawerStyle: {
+            width: 280,
+          },
+          overlayColor: 'rgba(0,0,0,0.5)',
+          drawerPosition: 'left',
         }}
       >
-        <Stack.Screen name="index" />
-        <Stack.Screen name="browse" />
-        <Stack.Screen name="calendar" />
-        <Stack.Screen name="meeting/[id]" />
-      </Stack>
-    </SafeAreaProvider>
+        <Drawer.Screen name="index" options={{ title: 'Acasă' }} />
+        <Drawer.Screen name="browse" options={{ title: 'Întâlniri' }} />
+        <Drawer.Screen name="calendar" options={{ title: 'Calendar' }} />
+        <Drawer.Screen name="onboarding" options={{ title: 'Setări' }} />
+        <Drawer.Screen name="meeting/[id]" options={{ title: 'Detalii' }} />
+      </Drawer>
+    </GestureHandlerRootView>
   );
 }

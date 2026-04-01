@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { View, Text, Pressable, ActivityIndicator } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import { Upload, FileAudio, X } from 'lucide-react-native';
 import { COLORS } from '../constants/theme';
@@ -61,58 +60,57 @@ export default function AudioUploader({ onUploadComplete, verticalType = 'GAL' }
     meetingId: string,
     attempt: number = 0
   ): Promise<void> => {
-    try {
-      // Simulate progress during upload
-      const progressInterval = setInterval(() => {
-        setProgress((prev) => {
-          if (prev.percentage >= 90) {
-            clearInterval(progressInterval);
-            return prev;
-          }
-          return {
-            totalBytesSent: prev.totalBytesSent + 10,
-            totalBytesExpectedToSend: 100,
-            percentage: prev.percentage + 10,
-          };
-        });
-      }, 500);
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
 
-      const uploadResult = await FileSystem.uploadAsync(
-        `${API_BASE_URL}/api/meetings/${meetingId}/upload`,
-        uri,
-        {
-          httpMethod: 'POST',
-          fieldName: 'file',
-          headers: {
-            Accept: 'application/json',
-          },
+      // Progress tracking
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const percentage = Math.round((e.loaded / e.total) * 100);
+          setProgress({
+            totalBytesSent: e.loaded,
+            totalBytesExpectedToSend: e.total,
+            percentage,
+          });
         }
-      );
+      };
 
-      clearInterval(progressInterval);
+      // Success handler
+      xhr.onload = () => {
+        if (xhr.status === 200) {
+          resolve();
+        } else {
+          reject(new Error(`Upload failed with status ${xhr.status}`));
+        }
+      };
 
-      // Final progress
-      setProgress({
-        totalBytesSent: 100,
-        totalBytesExpectedToSend: 100,
-        percentage: 100,
-      });
+      // Error handler
+      xhr.onerror = () => {
+        reject(new Error('Network error during upload'));
+      };
 
-      if (uploadResult.status === 200) {
-        return;
-      }
+      // Prepare form data
+      const formData = new FormData();
+      formData.append('file', {
+        uri,
+        type: 'audio/m4a',
+        name: selectedFile.name || `audio_${Date.now()}.m4a`,
+      } as any);
 
-      throw new Error(`Upload failed with status ${uploadResult.status}`);
-    } catch (error) {
+      // Send request
+      xhr.open('POST', `${API_BASE_URL}/api/meetings/${meetingId}/upload`);
+      xhr.setRequestHeader('Accept', 'application/json');
+      xhr.send(formData);
+    }).catch(async (error) => {
       if (attempt < UPLOAD_CONFIG.maxRetries - 1) {
-        // Wait before retry with exponential backoff
+        // Retry with exponential backoff
         const backoffMs = UPLOAD_CONFIG.backoffMs[attempt];
         console.log(`Upload attempt ${attempt + 1} failed, retrying in ${backoffMs}ms...`);
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
         return uploadWithRetry(uri, meetingId, attempt + 1);
       }
       throw error;
-    }
+    });
   };
 
   const handleUpload = async () => {
