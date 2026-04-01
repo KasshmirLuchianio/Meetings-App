@@ -9,7 +9,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '../components/ui/alert-dialog';
-import { Search, MapPin, Filter, FileAudio, X, Pencil } from 'lucide-react';
+import { Search, Filter, FileAudio, X, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { AnimatedList, AnimatedItem, FadeIn } from '../components/AnimatedList';
 
@@ -88,31 +88,6 @@ export default function BrowsePage({ backendUrl, localities }) {
             className="pl-10 h-12 rounded-xl text-base"
             data-testid="meetings-search-input"
           />
-        </div>
-      </FadeIn>
-
-      <FadeIn delay={0.05}>
-        <div className="flex gap-2 flex-wrap">
-          <Badge
-            variant={!activeLocality ? 'default' : 'secondary'}
-            className="cursor-pointer px-3 py-1.5 text-sm active:scale-95 transition-transform"
-            onClick={clearLocality}
-            data-testid="locality-chip-all"
-          >
-            Toate ({total})
-          </Badge>
-          {localities.map(loc => (
-            <Badge
-              key={loc.name}
-              variant={activeLocality === loc.name ? 'default' : 'secondary'}
-              className="cursor-pointer px-3 py-1.5 text-sm gap-1 active:scale-95 transition-transform"
-              onClick={() => activeLocality === loc.name ? clearLocality() : setSearchParams({ locality: loc.name })}
-              data-testid="locality-chip"
-            >
-              <MapPin className="h-3 w-3" />
-              {loc.name} ({loc.count || 0})
-            </Badge>
-          ))}
         </div>
       </FadeIn>
 
