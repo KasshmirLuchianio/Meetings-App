@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from './ui/sheet';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -15,7 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './ui/alert-dialog';
-import { MapPin, FolderOpen, FolderPlus, ChevronRight, Trash2 } from 'lucide-react';
+import { MapPin, FolderOpen, FolderPlus, ChevronRight, Trash2, Mic } from 'lucide-react';
 import { toast } from 'sonner';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
@@ -164,11 +165,17 @@ function FolderItem({ name, count, onSelect, onFolderDeleted }) {
 }
 
 export default function LocalitiesDrawer({ open, onClose, localities, onSelectLocality, onLocalitiesChanged }) {
+  const navigate = useNavigate();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [creating, setCreating] = useState(false);
 
   const totalCount = localities.reduce((sum, loc) => sum + (loc.count || 0), 0);
+
+  const handleNavigateToRecord = () => {
+    navigate('/');
+    onClose();
+  };
 
   const handleCreateFolder = async () => {
     const name = newFolderName.trim();
@@ -210,7 +217,21 @@ export default function LocalitiesDrawer({ open, onClose, localities, onSelectLo
 
           <Separator />
 
-          <ScrollArea className="h-[calc(100vh-180px)]">
+          {/* Primary action: Record button */}
+          <div className="p-4">
+            <Button
+              onClick={handleNavigateToRecord}
+              className="w-full h-14 rounded-xl gap-2 text-base font-semibold bg-primary hover:bg-primary/90 shadow-lg active:scale-[0.98] transition-transform"
+              data-testid="drawer-record-button"
+            >
+              <Mic className="h-5 w-5" />
+              Înregistrează
+            </Button>
+          </div>
+
+          <Separator />
+
+          <ScrollArea className="h-[calc(100vh-260px)]">
             <div className="p-2">
               {/* All meetings */}
               <button
