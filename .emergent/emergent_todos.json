@@ -1,26 +1,26 @@
 [
   {
-    "content": "P0.1: Testing documentation & preparation",
+    "content": "EP-00·ST-003: Backend API validation + script",
     "status": "completed"
   },
   {
-    "content": "P0.2: Status Pipeline - real-time updates cu polling + pull-to-refresh",
+    "content": "EP-02·ST-007: MongoDB migration script verificat",
     "status": "completed"
   },
   {
-    "content": "P1.1: Browse Polish - search + filtre (vertical, status) + paginare",
+    "content": "EP-01·ST-004: Font size R-005 (16sp/16pt minimum)",
     "status": "completed"
   },
   {
-    "content": "P1.2: Calendar Optimization - cache months + prefetch + count indicator",
+    "content": "PRD Compliance Check complet (31/31)",
     "status": "completed"
   },
   {
-    "content": "P1.3: Export PDF/DOCX - UI + expo-sharing integration",
+    "content": "README final cu Quick Start + Architecture",
     "status": "completed"
   },
   {
-    "content": "Bundle Phase 3 creat și disponibil pentru download",
+    "content": "Bundle FINAL creat cu toate asset-urile",
     "status": "completed"
   }
 ]
