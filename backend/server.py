@@ -25,7 +25,7 @@ DB_NAME = os.environ.get("DB_NAME", "gal_meetings")
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
 
-UPLOAD_DIR = Path("/tmp/gal_uploads")
+UPLOAD_DIR = Path("/app/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # ==================== APP ====================
