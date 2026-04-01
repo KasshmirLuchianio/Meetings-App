@@ -369,6 +369,20 @@ async def get_verticals():
     return {"verticals": list_verticals()}
 
 
+@app.get("/download/meetings-ro.zip")
+async def download_project():
+    """Download Meetings.ro Expo project"""
+    from fastapi.responses import FileResponse
+    zip_path = "/tmp/meetings-ro.zip"
+    if not os.path.exists(zip_path):
+        raise HTTPException(status_code=404, detail="Project archive not found")
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename="meetings-ro.zip"
+    )
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "Meetings.ro API"}
