@@ -118,6 +118,7 @@ class ActionItemModel(BaseModel):
 class MeetingCreate(BaseModel):
     title: Optional[str] = None
     locality: Optional[str] = None
+    vertical_type: Optional[str] = "GAL"
 
 
 class MeetingUpdate(BaseModel):
@@ -159,7 +160,44 @@ async def transcribe_audio(file_path: str) -> dict:
     return {"text": transcript_text, "segments": segments}
 
 
-async def extract_meeting_data(transcript: str) -> dict:
+async def extract_meeting_data(transcript: str, vertical_type: str = "GAL") -> dict:
+    """Extract structured data from transcript using Claude based on vertical."""
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from verticals import get_vertical_config
+    
+    # Get vertical config
+    vertical_config = get_vertical_config(vertical_type)
+    
+    session_id = f"extract-{uuid.uuid4()}"
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=session_id,
+        system_message=vertical_config.prompt_template
+    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+    
+    user_message = UserMessage(
+        text=f"Extrage informațiile structurate din această transcriere:\n\n{transcript}"
+    )
+    
+    response = await chat.send_message(user_message)
+    
+    # Parse JSON from response
+    try:
+        result = json.loads(response)
+    except json.JSONDecodeError:
+        # Try to extract JSON block
+        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+        if json_match:
+            result = json.loads(json_match.group(1))
+        else:
+            start = response.find('{')
+            end = response.rfind('}') + 1
+            if start >= 0 and end > start:
+                result = json.loads(response[start:end])
+            else:
+                raise ValueError(f"Could not parse JSON from response")
+    
+    return result
     """Extract structured data from transcript using Claude."""
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     
@@ -262,8 +300,9 @@ async def process_meeting(meeting_id: str):
         )
         
         # Step 2: Extract structured data (GAL format)
-        print(f"[GAL] Extracting data for meeting {meeting_id}...")
-        extracted = await extract_meeting_data(transcription["text"])
+        print(f"[Meetings.ro] Extracting data for meeting {meeting_id}...")
+        vertical_type = meeting.get("vertical_type", "GAL")
+        extracted = await extract_meeting_data(transcription["text"], vertical_type)
         
         # Determine locality
         locality = extracted.get("locality") or "Necunoscut"
@@ -323,6 +362,13 @@ async def process_meeting(meeting_id: str):
 
 # ==================== API ENDPOINTS ====================
 
+@app.get("/api/v1/verticals")
+async def get_verticals():
+    """Get all available vertical configurations."""
+    from verticals import list_verticals
+    return {"verticals": list_verticals()}
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "Meetings.ro API"}
@@ -334,6 +380,10 @@ async def health():
 async def create_meeting(data: MeetingCreate = None):
     """Create a new meeting placeholder."""
     now = datetime.now(timezone.utc)
+    
+    # Get vertical_type from request or default to GAL
+    vertical_type = data.vertical_type if data and hasattr(data, 'vertical_type') else "GAL"
+    
     meeting = {
         "title": (data.title if data and data.title else None),
         "locality": (data.locality if data and data.locality else None),
@@ -342,7 +392,7 @@ async def create_meeting(data: MeetingCreate = None):
         "audio_url": None,
         "transcript": None,
         "segments": [],
-        # GAL report fields
+        # GAL report fields (backward compat)
         "data_desfasurare": None,
         "format_intalnire": None,
         "loc_desfasurare": None,
@@ -352,6 +402,9 @@ async def create_meeting(data: MeetingCreate = None):
         "scurta_descriere": None,
         "numar_participanti": None,
         "concluzia": None,
+        # Vertical system
+        "vertical_type": vertical_type,
+        "vertical_config": {},
         "status": "pending",
         "error": None,
         "duration": 0,

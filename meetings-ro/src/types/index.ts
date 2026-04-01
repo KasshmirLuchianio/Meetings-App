@@ -59,10 +59,12 @@ export interface VerticalConfig {
   name: VerticalType;
   display_name_ro: string;
   icon: string;
+  description_ro: string;
   prompt_template: string;
   output_fields: OutputField[];
   predefined_locations: string[] | null;
   color_accent: string;
+  has_predefined_locations: boolean;
 }
 
 export interface UploadProgress {
