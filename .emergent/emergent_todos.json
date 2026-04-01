@@ -1,38 +1,26 @@
 [
   {
-    "content": "Phase 1: Core POC - Setup Emergent LLM Key + install dependencies",
+    "content": "Verificare logică cod: Drawer navigation - TopBar hamburger conectat la navigation.openDrawer()",
     "status": "completed"
   },
   {
-    "content": "Phase 1: Core POC - Test Whisper Romanian transcription",
+    "content": "Verificare logică cod: AudioUploader XMLHttpRequest progress tracking implementat corect",
     "status": "completed"
   },
   {
-    "content": "Phase 1: Core POC - Test Claude structured JSON extraction (summary, actions, locality)",
+    "content": "Verificare logică cod: Toate screen-urile au TopBar consistent (index, browse, calendar, onboarding)",
     "status": "completed"
   },
   {
-    "content": "Phase 1: Core POC - End-to-end chain test (Audio → Transcript → AI Processing)",
+    "content": "Verificare dependențe: @react-navigation/native instalat și functional",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Design guidelines from design_agent",
+    "content": "Creare bundle ZIP pentru utilizator să testeze Expo app local",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Backend implementation (FastAPI + MongoDB)",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 2: Frontend implementation (React PWA, Romanian UI)",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 2: All user stories covered in Development",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 2: End to End Testing using Testing Agent",
+    "content": "Documentație completă cu instrucțiuni instalare și testing",
     "status": "completed"
   }
 ]

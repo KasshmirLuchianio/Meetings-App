@@ -79,7 +79,7 @@ export default function HomeScreen() {
 
   return (
     <View className="flex-1 bg-ivory">
-      <TopBar onMenuPress={() => {}} />
+      <TopBar />
 
       <ScrollView className="flex-1" contentContainerClassName="px-4 py-6">
         {/* Tabs */}

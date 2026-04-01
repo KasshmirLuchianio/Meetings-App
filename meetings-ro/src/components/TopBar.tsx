@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import { DrawerNavigationProp } from '@react-navigation/drawer';
 import * as Haptics from 'expo-haptics';
 import { Menu, Calendar } from 'lucide-react-native';
 
@@ -12,6 +14,7 @@ interface TopBarProps {
 export default function TopBar({ onMenuPress }: TopBarProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<DrawerNavigationProp<any>>();
 
   const handleCalendarPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -20,7 +23,11 @@ export default function TopBar({ onMenuPress }: TopBarProps) {
 
   const handleMenuPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    onMenuPress?.();
+    if (onMenuPress) {
+      onMenuPress();
+    } else {
+      navigation.openDrawer();
+    }
   };
 
   return (
