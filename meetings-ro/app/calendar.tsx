@@ -28,6 +28,7 @@ interface MarkedDates {
   [date: string]: {
     marked: boolean;
     dotColor: string;
+    count?: number;
   };
 }
 
@@ -51,6 +52,7 @@ export default function CalendarScreen() {
     new Date().toISOString().split('T')[0]
   );
   const [markedDates, setMarkedDates] = useState<MarkedDates>({});
+  const [monthCache, setMonthCache] = useState<Record<string, MarkedDates>>({});
   const [dayMeetings, setDayMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(false);
   const [currentMonth, setCurrentMonth] = useState({
@@ -60,6 +62,10 @@ export default function CalendarScreen() {
 
   useEffect(() => {
     fetchMonthDates(currentMonth.year, currentMonth.month);
+    // Prefetch next month
+    const nextMonth = currentMonth.month === 12 ? 1 : currentMonth.month + 1;
+    const nextYear = currentMonth.month === 12 ? currentMonth.year + 1 : currentMonth.year;
+    prefetchMonth(nextYear, nextMonth);
   }, [currentMonth]);
 
   useEffect(() => {
@@ -67,6 +73,13 @@ export default function CalendarScreen() {
   }, [selectedDate]);
 
   const fetchMonthDates = async (year: number, month: number) => {
+    // Check cache first
+    const cacheKey = `${year}-${month}`;
+    if (monthCache[cacheKey]) {
+      setMarkedDates(monthCache[cacheKey]);
+      return;
+    }
+
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/meetings/calendar-dates?year=${year}&month=${month}`
@@ -76,16 +89,56 @@ export default function CalendarScreen() {
       const data = await response.json();
       const marked: MarkedDates = {};
 
-      Object.keys(data.dates).forEach((date) => {
+      Object.entries(data.dates).forEach(([date, count]: [string, any]) => {
         marked[date] = {
           marked: true,
           dotColor: COLORS.navy,
+          count: count as number,
         };
       });
 
       setMarkedDates(marked);
+      
+      // Update cache
+      setMonthCache((prev) => ({
+        ...prev,
+        [cacheKey]: marked,
+      }));
     } catch (error) {
       console.error('Fetch calendar dates error:', error);
+    }
+  };
+
+  const prefetchMonth = async (year: number, month: number) => {
+    const cacheKey = `${year}-${month}`;
+    if (monthCache[cacheKey]) {
+      return; // Already cached
+    }
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/meetings/calendar-dates?year=${year}&month=${month}`
+      );
+      if (!response.ok) return;
+
+      const data = await response.json();
+      const marked: MarkedDates = {};
+
+      Object.entries(data.dates).forEach(([date, count]: [string, any]) => {
+        marked[date] = {
+          marked: true,
+          dotColor: COLORS.navy,
+          count: count as number,
+        };
+      });
+
+      // Update cache silently
+      setMonthCache((prev) => ({
+        ...prev,
+        [cacheKey]: marked,
+      }));
+    } catch (error) {
+      console.error('Prefetch month error:', error);
     }
   };
 
@@ -219,6 +272,7 @@ export default function CalendarScreen() {
                 selectedColor: COLORS.navy,
               },
             }}
+            markingType="multi-dot"
             theme={{
               backgroundColor: '#FFFFFF',
               calendarBackground: '#FFFFFF',

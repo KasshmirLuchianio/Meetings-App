@@ -1,26 +1,26 @@
 [
   {
-    "content": "TASK 1: Browse Screen - listă întâlniri grupate pe vertical cu pull-to-refresh",
+    "content": "P0.1: Testing documentation & preparation",
     "status": "completed"
   },
   {
-    "content": "TASK 2: Calendar Screen - vizualizare lunară cu marcare zile + listă filtrată",
+    "content": "P0.2: Status Pipeline - real-time updates cu polling + pull-to-refresh",
     "status": "completed"
   },
   {
-    "content": "TASK 3: Waveform în AudioRecorder - custom implementation cu Animated API",
+    "content": "P1.1: Browse Polish - search + filtre (vertical, status) + paginare",
     "status": "completed"
   },
   {
-    "content": "Verificare implementare: Browse screen cu badges și navigare",
+    "content": "P1.2: Calendar Optimization - cache months + prefetch + count indicator",
     "status": "completed"
   },
   {
-    "content": "Verificare implementare: Calendar cu react-native-calendars",
+    "content": "P1.3: Export PDF/DOCX - UI + expo-sharing integration",
     "status": "completed"
   },
   {
-    "content": "Verificare implementare: Waveform 32 bare + expo-av metering",
+    "content": "Bundle Phase 3 creat și disponibil pentru download",
     "status": "completed"
   }
 ]
