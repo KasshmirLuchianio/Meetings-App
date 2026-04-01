@@ -5,9 +5,10 @@
 - Consolidarea unui **V1 utilizabil** în Expo RN (SDK 54) cu:
   - navigare **Drawer** accesibilă din TopBar (hamburger)
   - **workspace (vertical) selector** persistent (AsyncStorage)
-  - **audio recording** nativ (m4a/aac)
+  - **audio recording** nativ (m4a/aac) + **waveform live** în timpul înregistrării
   - **audio upload** nativ cu **progres real** (XMLHttpRequest) + retry/backoff
-- Ridicarea nivelului de calitate pentru **Faza 3 (hardening + features)**: listare întâlniri, status pipeline clar, export și testare pe device.
+  - ecrane **Browse** și **Calendar** funcționale (listare + filtrare după zi)
+- Ridicarea nivelului de calitate pentru **Faza 3 (hardening + features)**: testare pe device, clarificare/afișare status pipeline, export (PDF/DOCX), offline queue.
 
 ---
 
@@ -17,7 +18,7 @@
 > Scop: validare end-to-end cu backend-ul și Vertical Engine.
 
 **Stare curentă:**
-- 🟡 POC funcțional la nivel de aplicație (componentele există și sunt integrate), dar necesită **testare sistematică pe device** și/sau script POC pentru repetabilitate.
+- 🟡 Fluxul există și este integrat în aplicația Expo RN, dar necesită **testare sistematică pe device** și/sau un **script POC repetabil**.
 
 **User stories (POC)**
 1. Ca utilizator, vreau să pot crea o întâlnire cu `vertical_type` și să primesc un `meeting_id` valid.
@@ -41,14 +42,16 @@
 ---
 
 ### Faza 2 — Dezvoltare V1 App (MVP) în jurul fluxului core
-**Stare curentă:** ✅ **COMPLETATĂ**
+**Stare curentă:** ✅ **COMPLETATĂ** (extinsă cu Browse/Calendar + Waveform)
 
 **User stories (V1)**
 1. Ca utilizator, vreau să deschid meniul Drawer din hamburger (TopBar) și să navighez între Acasă/Întâlniri/Calendar/Setări.
 2. Ca utilizator, vreau să selectez workspace-ul (GAL/Jurnalism/Juridic/Bancar) și să fie folosit la întâlnirile noi.
-3. Ca utilizator, vreau să înregistrez audio nativ (m4a/aac) și să inițiez upload către backend.
+3. Ca utilizator, vreau să înregistrez audio nativ (m4a/aac) și să văd un waveform live doar în timpul înregistrării.
 4. Ca utilizator, vreau să pot încărca un fișier audio existent și să văd progresul real al upload-ului.
 5. Ca utilizator, vreau să deschid ecranul unei întâlniri și să văd raportul dinamic (secțiuni diferite pe vertical).
+6. Ca utilizator, vreau să văd lista tuturor întâlnirilor (Browse), grupate pe vertical.
+7. Ca utilizator, vreau un calendar lunar care marchează zilele cu întâlniri și îmi filtrează lista pe zi.
 
 **Implementare (realizată)**
 - UI/Navigation:
@@ -59,48 +62,78 @@
 - Workspace:
   - ✅ `VerticalSelector` salvează în AsyncStorage și se reflectă pe Home (record/upload).
 - Audio:
-  - ✅ `AudioRecorder` (expo-av) produce fișier m4a și declanșează upload (flow existent pe Home).
+  - ✅ `AudioRecorder` (expo-av) produce fișier m4a.
+  - ✅ **Waveform live**: implementare custom cu Animated API (32 bare) bazată pe metering.
+    - `react-native-audiowaveform` verificată: **nepotrivită pentru Expo Managed** → s-a ales custom.
+    - Update interval ~16ms (țintă 60fps); animația de height folosește `useNativeDriver: false` (limitare RN).
   - ✅ `AudioUploader` folosește XHR + progres real-time + retry/backoff.
+- Browse:
+  - ✅ `/app/browse.tsx` implementat complet:
+    - GET `/api/meetings` (limit 100)
+    - grupare pe `vertical_type`
+    - item: titlu (DD.MM.YYYY | Localitatea), status badge, vertical badge
+    - tap → `/meeting/[id]`
+    - pull-to-refresh (RefreshControl)
+    - empty state: „Nicio întâlnire încă”
+- Calendar:
+  - ✅ `react-native-calendars@1.1314.0` instalat.
+  - ✅ `/app/calendar.tsx` implementat complet:
+    - zile marcate cu dot navy via GET `/api/meetings/calendar-dates?year&month`
+    - tap pe zi → listă filtrată via GET `/api/meetings/calendar-by-date?date=YYYY-MM-DD`
+    - empty state: „Nicio întâlnire în această zi”
 - Meeting detail:
   - ✅ `DynamicReportView` consumă backend și randează raportul conform `vertical_config`.
 
+**Fișiere modificate (cheie)**
+- ✅ `/app/meetings-ro/app/browse.tsx` — rewrite complet
+- ✅ `/app/meetings-ro/app/calendar.tsx` — rewrite complet
+- ✅ `/app/meetings-ro/src/components/AudioRecorder.tsx` — rewrite complet cu waveform
+- ✅ `/app/meetings-ro/package.json` — adăugat `react-native-calendars`
+
 **Artefacte livrate**
-- ✅ Bundle v1.1 disponibil pentru download:
+- ✅ Bundle disponibil pentru download:
   - `https://gal-transcribe.preview.emergentagent.com/download/meetings-ro.zip`
-- ✅ Documentație completă:
+- ✅ Bundle actualizat local:
+  - `/tmp/meetings-ro.zip` (~184KB)
+- ✅ Documentație:
   - `/tmp/DRAWER_NAVIGATION_COMPLETE.md`
 
 **Concluzie fază**
-- Urmează execuția testelor end-to-end pe device (parte din Faza 3).
+- V1 UI este complet (Drawer + Browse + Calendar + Workspace + Record/Upload + Report). Urmează testarea reală pe device și hardening.
 
 ---
 
 ### Faza 3 — Extindere funcționalități + hardening
-**Stare curentă:** 🔜 **URMĂTOAREA FAZĂ (începe acum)**
+**Stare curentă:** 🔜 **ÎN DESFĂȘURARE (prioritate P0: testare pe device)**
 
 **User stories (Hardening/Features)**
 1. Ca utilizator, vreau ca upload-urile întrerupte să poată fi reluate (reselect + retry) fără a pierde întâlnirea.
 2. Ca utilizator, vreau să văd status clar: „în curs”, „upload”, „transcriere”, „analiză”, „gata”, „eșuat”.
-3. Ca utilizator, vreau să pot lista întâlnirile în Browse și să reiau o întâlnire din listă.
+3. Ca utilizator, vreau să pot lista întâlnirile în Browse și să reiau o întâlnire din listă (deja implementat; urmează polish + paginare).
 4. Ca utilizator, vreau export (PDF/DOCX) via share sheet (când e disponibil).
 5. Ca utilizator, vreau ca aplicația să funcționeze bine offline (înregistrare + coadă upload).
+6. Ca utilizator, vreau ca waveform-ul să fie stabil pe device (performanță, consum, sampling corect metering).
 
 **Implementare (actualizată)**
 - Testare pe device fizic (P0):
-  - iOS + Android: validare Drawer, recording, upload XHR cu fișiere mari (50–100MB), backgrounding.
+  - iOS + Android: validare Drawer, Browse, Calendar, recording + waveform, upload XHR cu fișiere mari (50–100MB), backgrounding.
 - Browse real (P0/P1):
-  - implementare listare întâlniri din backend (paginare minimă, refresh, tap → `/meeting/[id]`).
-- Calendar view (P1):
-  - grouping întâlniri pe dată + UI calendar/listă.
+  - deja implementat; adăugări: paginare, search, filtre (locality/status/vertical), caching.
+- Calendar view (P0/P1):
+  - deja implementat; adăugări: schimbare lună mai robustă, indicator count, optimizări request.
 - Status pipeline (P0):
-  - clarificare contract backend (status-uri + timestamps), afișare în UI.
+  - aliniere backend↔frontend pe status-uri; afișare status în listă + detalii.
 - Offline queue (P1/P2):
-  - stocare metadate fișier + meeting draft + retry la reconectare.
+  - stocare draft-uri + fișiere, retry la reconectare.
 - Export P1:
   - PDF/DOCX export cu `expo-file-system` + `expo-sharing`.
+- Waveform hardening (P0/P1):
+  - confirmare metering availability pe iOS/Android;
+  - dacă metering lipsește: fallback vizual controlat + sampling mai rar (ex. 33ms) pentru consum;
+  - eventual migrare la `expo-audio` când e disponibil/stabil pentru SDK 54+.
 
 **Concluzie fază**
-- 1 rundă de test end-to-end: scenarii offline/online + listare + redeschidere meeting.
+- 1 rundă de test end-to-end: scenarii offline/online + listare + redeschidere meeting + calendar.
 
 ---
 
@@ -110,31 +143,37 @@
 2. Ca utilizator, vreau ca progresul de upload să fie corect pentru fișiere mari (ex. 50–100MB).
 3. Ca utilizator, vreau ca rapoartele să fie consistente pe toate vertical-urile.
 4. Ca utilizator, vreau ca app-ul să nu crape la permisiuni (microfon/storage) și să primesc explicații.
-5. Ca utilizator, vreau performanță bună: listă întâlniri rapidă și ecran meeting fără lag.
+5. Ca utilizator, vreau performanță bună: listă întâlniri rapidă, calendar fluid, meeting detail fără lag.
 
 **Implementare**
 - Testare pe device fizic, regresii UI (NativeWind), permisiuni, backgrounding.
 - Observabilitate minimă: log-uri backend + coduri de eroare coerente.
 - Stabilizare dependențe/lockfiles:
-  - decizie și aliniere pe un singur package manager (npm sau yarn) + cleanup (evitat mix yarn.lock/package-lock).
+  - decizie și aliniere pe un singur package manager (npm sau yarn) + cleanup (evitat mix `yarn.lock`/`package-lock.json`).
 
 ---
 
 ## 3) Next Actions (imediat)
-1. **Testare pe device fizic** (iOS + Android): Drawer + TopBar hamburger + înregistrare + upload XHR cu progres.
+1. **Testare pe device fizic** (P0): Drawer + Browse + Calendar + waveform + înregistrare + upload XHR cu progres.
 2. Adaug **script Python POC** pentru backend (create meeting + upload + poll status) și rulez cu 2 vertical-uri.
-3. Confirm/completez contract endpoint-uri pentru „get meeting”/status (dacă lipsește, îl adaug).
-4. Implementare **Browse screen real** (listare întâlniri) + navigare la meeting detail.
-5. Încep **Calendar view** (grouping după dată) ca placeholder util, apoi UI complet.
-6. Export P1: design API/flow pentru PDF/DOCX + integrare `expo-sharing`.
+3. Ajustez contractul de status (și UI badges) pentru consistență (frontend ↔ backend).
+4. Implementare P0: **Browse polish** (paginare, search, filtre) + empty/error handling.
+5. Implementare P0/P1: **Calendar polish** (optimizați request-urile, handle month navigation edge cases).
+6. Export P1: design UI + integrare `expo-sharing` pentru PDF/DOCX.
 7. Curăț lockfiles: aleg un manager (recomandat în Expo: **npm**) și elimin inconsistențe.
 
 ---
 
 ## 4) Criterii de succes
 - POC: 3 rulări consecutive reușite (2 vertical-uri) pentru fluxul create→upload→processed→report.
-- Mobile: ✅ Drawer accesibil din TopBar pe toate ecranele relevante.
+- Mobile:
+  - ✅ Drawer accesibil din TopBar pe toate ecranele relevante.
+  - ✅ Browse: listare întâlniri grupate pe vertical + pull-to-refresh + navigare la detalii.
+  - ✅ Calendar: zile marcate cu dot navy + filtrare întâlniri pe zi + empty state.
 - Upload: ✅ progres real-time (bytes) funcțional și corect; retry/backoff funcționează.
+- Audio:
+  - ✅ Înregistrare m4a/aac funcțională.
+  - ✅ Waveform live (custom) vizibil doar în timpul înregistrării; reset la stop.
 - Raport: ✅ `DynamicReportView` afișează conținut specific vertical-ului fără erori.
 - Date: `vertical_type` persistă în Mongo pentru toate întâlnirile noi; migrarea e completă.
-- QA: funcționare stabilă pe device fizic pentru fișiere mari + backgrounding + permisiuni.
+- QA: funcționare stabilă pe device fizic pentru fișiere mari + backgrounding + permisiuni + performanță (calendar/listă/waveform).

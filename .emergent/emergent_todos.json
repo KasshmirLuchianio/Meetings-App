@@ -1,26 +1,26 @@
 [
   {
-    "content": "Verificare logică cod: Drawer navigation - TopBar hamburger conectat la navigation.openDrawer()",
+    "content": "TASK 1: Browse Screen - listă întâlniri grupate pe vertical cu pull-to-refresh",
     "status": "completed"
   },
   {
-    "content": "Verificare logică cod: AudioUploader XMLHttpRequest progress tracking implementat corect",
+    "content": "TASK 2: Calendar Screen - vizualizare lunară cu marcare zile + listă filtrată",
     "status": "completed"
   },
   {
-    "content": "Verificare logică cod: Toate screen-urile au TopBar consistent (index, browse, calendar, onboarding)",
+    "content": "TASK 3: Waveform în AudioRecorder - custom implementation cu Animated API",
     "status": "completed"
   },
   {
-    "content": "Verificare dependențe: @react-navigation/native instalat și functional",
+    "content": "Verificare implementare: Browse screen cu badges și navigare",
     "status": "completed"
   },
   {
-    "content": "Creare bundle ZIP pentru utilizator să testeze Expo app local",
+    "content": "Verificare implementare: Calendar cu react-native-calendars",
     "status": "completed"
   },
   {
-    "content": "Documentație completă cu instrucțiuni instalare și testing",
+    "content": "Verificare implementare: Waveform 32 bare + expo-av metering",
     "status": "completed"
   }
 ]
