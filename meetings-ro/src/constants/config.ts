@@ -23,6 +23,7 @@ export const UPLOAD_CONFIG = {
   maxRetries: 3,
   backoffMs: [1000, 2000, 4000],
   chunkSize: 1024 * 1024, // 1MB chunks
+  maxFileSizeMB: 100,
 } as const;
 
 // Vertical types
