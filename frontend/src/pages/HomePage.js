@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import RecorderCard from '../components/RecorderCard';
+import UploadAudioCard from '../components/UploadAudioCard';
 import MeetingCard from '../components/MeetingCard';
 import { Skeleton } from '../components/ui/skeleton';
-import { FileAudio, ArrowRight } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { FileAudio, ArrowRight, Mic, Upload } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { AnimatedList, AnimatedItem, FadeIn } from '../components/AnimatedList';
 
@@ -43,13 +45,40 @@ export default function HomePage({ backendUrl, onMeetingCreated }) {
     if (onMeetingCreated) onMeetingCreated();
   };
 
+  const handleUploadComplete = () => {
+    fetchRecentMeetings();
+    if (onMeetingCreated) onMeetingCreated();
+  };
+
   return (
     <div className="px-4 py-4 space-y-6 safe-bottom">
       <FadeIn delay={0}>
-        <RecorderCard
-          backendUrl={backendUrl}
-          onRecordingComplete={handleRecordingComplete}
-        />
+        <Tabs defaultValue="record" className="w-full" data-testid="home-recording-tabs">
+          <TabsList className="w-full grid grid-cols-2 h-12 rounded-xl mb-4">
+            <TabsTrigger value="record" className="rounded-lg text-sm gap-2">
+              <Mic className="h-4 w-4" />
+              Înregistrează
+            </TabsTrigger>
+            <TabsTrigger value="upload" className="rounded-lg text-sm gap-2">
+              <Upload className="h-4 w-4" />
+              Încarcă audio
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="record" className="mt-0">
+            <RecorderCard
+              backendUrl={backendUrl}
+              onRecordingComplete={handleRecordingComplete}
+            />
+          </TabsContent>
+
+          <TabsContent value="upload" className="mt-0">
+            <UploadAudioCard
+              backendUrl={backendUrl}
+              onUploadComplete={handleUploadComplete}
+            />
+          </TabsContent>
+        </Tabs>
       </FadeIn>
 
       <FadeIn delay={0.1}>
