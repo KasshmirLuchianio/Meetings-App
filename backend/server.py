@@ -23,20 +23,30 @@ load_dotenv()
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "gal_meetings")
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
-CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
+
+# CORS Origins - includes Expo development
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",                         # Web dev
+    "https://*.preview.emergentagent.com",           # Emergent preview
+    "https://meetings.ro",                           # Production web
+    "exp://192.168.*",                               # Expo Go LAN (iOS/Android)
+    "exp://localhost:19000",                         # Expo dev server
+    "capacitor://localhost",                         # Capacitor (if needed)
+]
 
 UPLOAD_DIR = Path("/app/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # ==================== APP ====================
-app = FastAPI(title="GAL Meetings API", version="1.0.0")
+app = FastAPI(title="Meetings.ro API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # TODO: Restrict in production to CORS_ALLOWED_ORIGINS
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Range", "Accept-Ranges"],  # HTTP 206 Range support
 )
 
 # ==================== DATABASE ====================
@@ -315,7 +325,7 @@ async def process_meeting(meeting_id: str):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "GAL Meetings API"}
+    return {"status": "ok", "service": "Meetings.ro API"}
 
 
 # ---- MEETINGS CRUD ----
@@ -1036,3 +1046,12 @@ async def get_meeting_status(meeting_id: str):
     if not meeting:
         raise HTTPException(status_code=404, detail="Ședința nu a fost găsită")
     return serialize_doc(meeting)
+
+
+# ---- HEALTH CHECK ----
+
+@app.get("/api/health")
+async def health_check():
+    """API health check."""
+    return {"status": "ok", "service": "Meetings.ro API"}
+
