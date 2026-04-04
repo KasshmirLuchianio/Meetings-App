@@ -52,7 +52,7 @@ npx expo start
 
 Backend FastAPI rulează deja pe:
 ```
-https://gal-transcribe.preview.emergentagent.com
+https://meetings-ro-api.onrender.com
 ```
 
 Dacă vrei să rulezi local:
@@ -241,7 +241,7 @@ Ghid complet în: `/tmp/PHASE3_TESTING_GUIDE.md`
 
 ### Base URL
 ```
-https://gal-transcribe.preview.emergentagent.com
+https://meetings-ro-api.onrender.com
 ```
 
 ### Endpoints
@@ -288,14 +288,15 @@ Configurate pentru:
 
 **Frontend** (`meetings-ro/.env`):
 ```
-REACT_APP_BACKEND_URL=https://gal-transcribe.preview.emergentagent.com
+EXPO_PUBLIC_API_URL=https://meetings-ro-api.onrender.com
 ```
 
 **Backend** (`backend/.env`):
 ```
 MONGO_URL=mongodb://localhost:27017
 DB_NAME=gal_meetings
-EMERGENT_LLM_KEY=[provided automatically]
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ### app.json Metadata
@@ -333,10 +334,10 @@ eas build --platform android --profile production
 
 ### Backend Deployment
 
-Backend rulează pe Emergent infrastructure:
-- **URL:** https://gal-transcribe.preview.emergentagent.com
-- **Port:** 8001 (internal)
-- **Supervisor:** auto-restart enabled
+Backend rulează pe Render.com:
+- **URL:** https://meetings-ro-api.onrender.com
+- **Port:** 8000 (internal)
+- **Docker:** FastAPI + MongoDB all-in-one container
 
 ---
 
@@ -433,12 +434,12 @@ yarn add @react-navigation/native
 
 **Download Bundle:**
 ```
-https://gal-transcribe.preview.emergentagent.com/download/meetings-ro.zip
+https://meetings-ro-api.onrender.com/download/meetings-ro.zip
 ```
 
 **Backend Health:**
 ```
-curl https://gal-transcribe.preview.emergentagent.com/api/health
+curl https://meetings-ro-api.onrender.com/api/health
 ```
 
 **Issues:**

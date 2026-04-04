@@ -1,6 +1,6 @@
 // API Configuration
 export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || 'https://gal-transcribe.preview.emergentagent.com';
+  process.env.EXPO_PUBLIC_API_URL || 'https://meetings-ro-api.onrender.com';
 
 export const API_ENDPOINTS = {
   meetings: '/api/meetings',
