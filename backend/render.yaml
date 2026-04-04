@@ -8,7 +8,7 @@ services:
     name: meetings-ro-api
     runtime: docker
     dockerfilePath: ./Dockerfile
-    dockerContext: .
+    dockerContext: ./backend
     region: frankfurt  # eu-central — closest to Romania
     plan: starter      # $7/mo — 512MB RAM, 0.5 CPU (upgrade to standard for prod)
     branch: main
