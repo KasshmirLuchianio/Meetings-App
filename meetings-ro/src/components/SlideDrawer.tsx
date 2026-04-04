@@ -12,7 +12,7 @@ const DRAWER_WIDTH = 280;
 
 const PLAN_LABELS: Record<string, string> = {
   FREE: 'Starter',
-  PRO: 'Professional',
+  PRO: 'Pro',
   ENTERPRISE: 'Enterprise',
 };
 

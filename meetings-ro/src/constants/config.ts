@@ -48,7 +48,7 @@ export const PRICING_PLANS = [
     verticals: ['GAL', 'JOURNALISM'] as const,
     features: [
       '5 întâlniri / lună',
-      'Max 30 min / înregistrare',
+      'Max 30 min / întâlnire',
       '2 verticale disponibile',
       'Export PDF',
       'Transcriere AI',
@@ -56,15 +56,15 @@ export const PRICING_PLANS = [
   },
   {
     tier: 'PRO' as const,
-    name: 'Professional',
-    price_monthly: 49,
-    price_yearly: 470,
+    name: 'Pro',
+    price_monthly: 19,
+    price_yearly: 182,
     meetings_per_month: 100,
     max_duration_minutes: 120,
     verticals: 'all' as const,
     features: [
       '100 întâlniri / lună',
-      'Max 2 ore / înregistrare',
+      'Max 2 ore / întâlnire',
       'Toate verticalele',
       'Export PDF + DOCX',
       'Transcriere AI avansată',
@@ -75,14 +75,14 @@ export const PRICING_PLANS = [
   {
     tier: 'ENTERPRISE' as const,
     name: 'Enterprise',
-    price_monthly: 199,
-    price_yearly: 1910,
+    price_monthly: 99,
+    price_yearly: 950,
     meetings_per_month: null, // unlimited
     max_duration_minutes: 480,
     verticals: 'all' as const,
     features: [
       'Întâlniri nelimitate',
-      'Max 8 ore / înregistrare',
+      'Max 8 ore / întâlnire',
       'Toate verticalele',
       'Export PDF + DOCX + API',
       'AI personalizat pe domeniu',
