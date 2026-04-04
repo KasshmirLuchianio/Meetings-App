@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 import aiofiles
+import stripe
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 
@@ -26,6 +27,16 @@ MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "gal_meetings")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+
+# ==================== STRIPE ====================
+stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
+STRIPE_PRICES = {
+    "pro_monthly": "price_1TIOnGHa4KY3ww8wNuZfnCvN",
+    "pro_yearly": "price_1TIOneHa4KY3ww8wkmyVhjDP",
+    "enterprise_monthly": "price_1TIOnuHa4KY3ww8wYMLsIRIw",
+    "enterprise_yearly": "price_1TIOoCHa4KY3ww8wjDYteZ14",
+}
 
 # CORS Origins - includes Expo development
 CORS_ALLOWED_ORIGINS = [
@@ -1056,4 +1067,112 @@ async def get_meeting_status(meeting_id: str):
 async def health_check():
     """API health check."""
     return {"status": "ok", "service": "Meetings.ro API"}
+
+
+# ==================== STRIPE PAYMENTS ====================
+
+class CheckoutRequest(BaseModel):
+    plan: str  # "pro" or "enterprise"
+    interval: str  # "monthly" or "yearly"
+    user_email: str
+
+
+@app.post("/api/payments/create-checkout-session")
+async def create_checkout_session(req: CheckoutRequest):
+    """Create a Stripe Checkout Session for subscription."""
+    price_key = f"{req.plan}_{req.interval}"
+    price_id = STRIPE_PRICES.get(price_key)
+    if not price_id:
+        raise HTTPException(status_code=400, detail="Plan invalid")
+
+    try:
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            mode="subscription",
+            customer_email=req.user_email,
+            line_items=[{"price": price_id, "quantity": 1}],
+            success_url="https://meetings-ro-api.onrender.com/payment-success?session_id={CHECKOUT_SESSION_ID}",
+            cancel_url="https://meetings-ro-api.onrender.com/payment-cancel",
+        )
+        return {"url": session.url}
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/payments/webhook")
+async def stripe_webhook(request: Request):
+    """Handle Stripe webhook events."""
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    except stripe.error.SignatureVerificationError:
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        user_email = session.get("customer_email")
+        # Determine plan from price ID
+        subscription_id = session.get("subscription")
+        plan_tier = "PRO"  # default
+
+        if subscription_id:
+            try:
+                sub = stripe.Subscription.retrieve(subscription_id)
+                price_id = sub["items"]["data"][0]["price"]["id"]
+                if price_id in [STRIPE_PRICES["enterprise_monthly"], STRIPE_PRICES["enterprise_yearly"]]:
+                    plan_tier = "ENTERPRISE"
+            except Exception:
+                pass
+
+        if user_email:
+            await db.users.update_one(
+                {"email": user_email},
+                {"$set": {
+                    "plan": plan_tier,
+                    "stripe_customer_id": session.get("customer"),
+                    "stripe_subscription_id": subscription_id,
+                    "plan_updated_at": datetime.now(timezone.utc),
+                }},
+                upsert=True,
+            )
+            print(f"[Stripe] User {user_email} upgraded to {plan_tier}")
+
+    elif event["type"] == "customer.subscription.deleted":
+        session = event["data"]["object"]
+        customer_id = session.get("customer")
+        if customer_id:
+            await db.users.update_one(
+                {"stripe_customer_id": customer_id},
+                {"$set": {
+                    "plan": "FREE",
+                    "stripe_subscription_id": None,
+                    "plan_updated_at": datetime.now(timezone.utc),
+                }}
+            )
+            print(f"[Stripe] Customer {customer_id} downgraded to FREE")
+
+    return {"status": "ok"}
+
+
+@app.get("/payment-success")
+async def payment_success(session_id: str = ""):
+    """Redirect page after successful payment."""
+    return JSONResponse(content={
+        "status": "success",
+        "message": "Plata a fost procesată cu succes! Poți închide această pagină și reveni în aplicație.",
+        "session_id": session_id,
+    })
+
+
+@app.get("/payment-cancel")
+async def payment_cancel():
+    """Redirect page after cancelled payment."""
+    return JSONResponse(content={
+        "status": "cancelled",
+        "message": "Plata a fost anulată. Poți reveni în aplicație.",
+    })
 

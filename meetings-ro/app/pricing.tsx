@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { View, Text, Pressable, ScrollView } from 'react-native';
+import { View, Text, Pressable, ScrollView, Linking, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Check, Crown, Zap, Building2, ArrowLeft } from 'lucide-react-native';
 import { COLORS } from '../src/constants/theme';
-import { PRICING_PLANS } from '../src/constants/config';
+import { PRICING_PLANS, API_BASE_URL } from '../src/constants/config';
 import { useAuth } from '../src/context/AuthContext';
 import { PricingTier } from '../src/types';
 
@@ -14,6 +14,7 @@ export default function PricingScreen() {
   const insets = useSafeAreaInsets();
   const { user, updatePlan } = useAuth();
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
+  const [loadingTier, setLoadingTier] = useState<string | null>(null);
 
   const tierIcons: Record<string, any> = {
     FREE: Zap,
@@ -27,10 +28,43 @@ export default function PricingScreen() {
     ENTERPRISE: COLORS.navy,
   };
 
-  const handleSelectPlan = (tier: PricingTier) => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    updatePlan(tier);
-    router.replace('/');
+  const handleSelectPlan = async (tier: PricingTier) => {
+    // Free plan — just update locally
+    if (tier === 'FREE') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      updatePlan(tier);
+      router.replace('/');
+      return;
+    }
+
+    // Paid plans — open Stripe Checkout
+    setLoadingTier(tier);
+    try {
+      const planKey = tier === 'PRO' ? 'pro' : 'enterprise';
+      const res = await fetch(`${API_BASE_URL}/api/payments/create-checkout-session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plan: planKey,
+          interval: billingCycle === 'yearly' ? 'yearly' : 'monthly',
+          user_email: user?.email || '',
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Eroare server' }));
+        throw new Error(err.detail || 'Eroare la crearea sesiunii de plată');
+      }
+
+      const { url } = await res.json();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await Linking.openURL(url);
+    } catch (error: any) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Eroare', error.message || 'Nu s-a putut deschide pagina de plată');
+    } finally {
+      setLoadingTier(null);
+    }
   };
 
   return (
@@ -149,8 +183,8 @@ export default function PricingScreen() {
                 {/* CTA */}
                 <Pressable
                   onPress={() => handleSelectPlan(plan.tier as PricingTier)}
-                  disabled={isCurrentPlan}
-                  className={`h-12 rounded-xl items-center justify-center ${
+                  disabled={isCurrentPlan || loadingTier === plan.tier}
+                  className={`h-12 rounded-xl items-center justify-center flex-row gap-2 ${
                     isCurrentPlan
                       ? 'bg-gray-200'
                       : isHighlighted
@@ -158,17 +192,21 @@ export default function PricingScreen() {
                       : 'bg-navy'
                   }`}
                 >
-                  <Text
-                    className={`font-heading text-sm ${
-                      isCurrentPlan
-                        ? 'text-gray-400'
-                        : isHighlighted
-                        ? 'text-navy'
-                        : 'text-white'
-                    }`}
-                  >
-                    {isCurrentPlan ? 'Plan activ' : price === 0 ? 'Începe gratuit' : 'Alege planul'}
-                  </Text>
+                  {loadingTier === plan.tier ? (
+                    <ActivityIndicator size="small" color={isHighlighted ? COLORS.navy : 'white'} />
+                  ) : (
+                    <Text
+                      className={`font-heading text-sm ${
+                        isCurrentPlan
+                          ? 'text-gray-400'
+                          : isHighlighted
+                          ? 'text-navy'
+                          : 'text-white'
+                      }`}
+                    >
+                      {isCurrentPlan ? 'Plan activ' : price === 0 ? 'Începe gratuit' : 'Alege planul'}
+                    </Text>
+                  )}
                 </Pressable>
               </View>
             );
