@@ -27,7 +27,9 @@ services:
         value: mongodb://localhost:27017
       - key: DB_NAME
         value: gal_meetings
-      - key: EMERGENT_LLM_KEY
+      - key: OPENAI_API_KEY
+        sync: false                   # Set manually in Render dashboard
+      - key: ANTHROPIC_API_KEY
         sync: false                   # Set manually in Render dashboard
       - key: STRIPE_SECRET_KEY
         sync: false                   # Set manually in Render dashboard

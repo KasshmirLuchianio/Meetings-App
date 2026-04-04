@@ -16,18 +16,21 @@ from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 import aiofiles
+from openai import AsyncOpenAI
+from anthropic import AsyncAnthropic
 
 load_dotenv()
 
 # ==================== CONFIG ====================
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "gal_meetings")
-EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
 # CORS Origins - includes Expo development
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",                         # Web dev
-    "https://*.preview.emergentagent.com",           # Emergent preview
+    "https://*.onrender.com",                         # Render preview
     "https://meetings.ro",                           # Production web
     "exp://192.168.*",                               # Expo Go LAN (iOS/Android)
     "exp://localhost:19000",                         # Expo dev server
@@ -126,24 +129,25 @@ class MeetingUpdate(BaseModel):
     locality: Optional[str] = None
 
 
+# ==================== AI CLIENTS ====================
+openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+
+
 # ==================== AI PROCESSING ====================
 async def transcribe_audio(file_path: str) -> dict:
-    """Transcribe audio using OpenAI Whisper via Emergent."""
-    from emergentintegrations.llm.openai import OpenAISpeechToText
-    
-    stt = OpenAISpeechToText(api_key=EMERGENT_LLM_KEY)
-    
+    """Transcribe audio using OpenAI Whisper SDK."""
     with open(file_path, "rb") as audio_file:
-        response = await stt.transcribe(
-            file=audio_file,
+        response = await openai_client.audio.transcriptions.create(
             model="whisper-1",
+            file=audio_file,
             response_format="verbose_json",
             language="ro",
             prompt="Aceasta este o ședință de lucru despre proiecte de infrastructură în Delta Dunării. Localități: Crișan, Maliuc, Sulina, Tulcea, Chilia Veche, Letea.",
             temperature=0.0,
             timestamp_granularities=["segment"]
         )
-    
+
     transcript_text = response.text
     segments = []
     if hasattr(response, 'segments') and response.segments:
@@ -156,112 +160,43 @@ async def transcribe_audio(file_path: str) -> dict:
                     "end": getattr(seg, 'end', 0),
                     "text": getattr(seg, 'text', '')
                 })
-    
+
     return {"text": transcript_text, "segments": segments}
 
 
 async def extract_meeting_data(transcript: str, vertical_type: str = "GAL") -> dict:
-    """Extract structured data from transcript using Claude based on vertical."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    """Extract structured data from transcript using Anthropic Claude SDK."""
     from verticals import get_vertical_config
-    
-    # Get vertical config
+
     vertical_config = get_vertical_config(vertical_type)
-    
-    session_id = f"extract-{uuid.uuid4()}"
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=session_id,
-        system_message=vertical_config.prompt_template
-    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-    
-    user_message = UserMessage(
-        text=f"Extrage informațiile structurate din această transcriere:\n\n{transcript}"
+
+    response = await anthropic_client.messages.create(
+        model="claude-sonnet-4-5-20250929",
+        max_tokens=2000,
+        system=vertical_config.prompt_template,
+        messages=[{
+            "role": "user",
+            "content": f"Extrage informațiile structurate din această transcriere:\n\n{transcript}"
+        }]
     )
-    
-    response = await chat.send_message(user_message)
-    
+
+    response_text = response.content[0].text
+
     # Parse JSON from response
     try:
-        result = json.loads(response)
+        result = json.loads(response_text)
     except json.JSONDecodeError:
-        # Try to extract JSON block
-        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
         if json_match:
             result = json.loads(json_match.group(1))
         else:
-            start = response.find('{')
-            end = response.rfind('}') + 1
+            start = response_text.find('{')
+            end = response_text.rfind('}') + 1
             if start >= 0 and end > start:
-                result = json.loads(response[start:end])
+                result = json.loads(response_text[start:end])
             else:
-                raise ValueError(f"Could not parse JSON from response")
-    
-    return result
-    """Extract structured data from transcript using Claude."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-    
-    system_prompt = """Ești un asistent care extrage informații structurate din transcrierile ședințelor GAL în limba română.
+                raise ValueError("Could not parse JSON from Claude response")
 
-REGULI:
-- NU inventa informații care nu sunt în transcriere
-- Folosește DOAR informațiile din transcriere
-- Fii concis și precis
-- Răspunde DOAR în limba română
-- Returnează DOAR JSON valid, fără alt text sau markdown
-
-LOCALITĂȚI CUNOSCUTE (verifică dacă apare vreuna în transcriere):
-- Chilia Veche
-- Crișan
-- C.A.Rosetti
-- Maliuc
-- Beștepe
-
-Dacă în transcriere apare una din aceste localități (sau variații ale numelui), folosește exact numele din lista de mai sus.
-
-FORMAT OUTPUT (JSON strict - structura raport GAL):
-{
-  "locality": "Numele localității principale din lista de mai sus sau null dacă nu apare niciuna",
-  "data_desfasurare": "Data menționată în ședință sau null (format: DD.MM.YYYY)",
-  "format_intalnire": "Tipul întâlnirii: fizică/online/hibrid sau null",
-  "loc_desfasurare": "Locul exact unde s-a desfășurat (ex: Primărie, Cămin Cultural) sau null",
-  "mod_promovare": "Cum a fost promovată întâlnirea (ex: afișe, Facebook, email) sau null",
-  "obiectiv": "Obiectivul principal al ședinței în 1-2 propoziții sau null",
-  "tematica": "Tema principală discutată în 1-2 propoziții sau null",
-  "scurta_descriere": "Rezumat scurt al discuțiilor în 2-4 propoziții sau null",
-  "numar_participanti": "Numărul de participanți menționat sau null",
-  "concluzia": "Concluzia principală sau următorii pași în 1-2 propoziții sau null"
-}"""
-    
-    session_id = f"extract-{uuid.uuid4()}"
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=session_id,
-        system_message=system_prompt
-    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-    
-    user_message = UserMessage(
-        text=f"Extrage informațiile structurate din această transcriere de ședință:\n\n{transcript}"
-    )
-    
-    response = await chat.send_message(user_message)
-    
-    # Parse JSON from response
-    try:
-        result = json.loads(response)
-    except json.JSONDecodeError:
-        # Try to extract JSON block
-        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
-        if json_match:
-            result = json.loads(json_match.group(1))
-        else:
-            start = response.find('{')
-            end = response.rfind('}') + 1
-            if start >= 0 and end > start:
-                result = json.loads(response[start:end])
-            else:
-                raise ValueError(f"Could not parse JSON from response")
-    
     return result
 
 
