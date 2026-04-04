@@ -317,7 +317,7 @@ export default function BrowseScreen() {
   if (loading) {
     return (
       <View className="flex-1 bg-ivory">
-        <TopBar />
+        <TopBar showBack />
         <View className="flex-1 justify-center items-center">
           <ActivityIndicator size="large" color={COLORS.navy} />
           <Text className="text-navy font-body mt-4">Se încarcă întâlnirile...</Text>
@@ -332,7 +332,7 @@ export default function BrowseScreen() {
   if (groupedData.length === 0 && !searchQuery && !selectedVertical && !selectedStatus) {
     return (
       <View className="flex-1 bg-ivory">
-        <TopBar />
+        <TopBar showBack />
         <View className="flex-1 justify-center items-center px-6">
           <View
             className="h-20 w-20 rounded-2xl items-center justify-center mb-4"
@@ -353,7 +353,7 @@ export default function BrowseScreen() {
 
   return (
     <View className="flex-1 bg-ivory">
-      <TopBar />
+      <TopBar showBack />
 
       {/* Search Bar */}
       <View className="px-4 pt-4 pb-2">

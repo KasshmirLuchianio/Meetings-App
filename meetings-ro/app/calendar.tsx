@@ -255,7 +255,7 @@ export default function CalendarScreen() {
 
   return (
     <View className="flex-1 bg-ivory">
-      <TopBar />
+      <TopBar showBack />
 
       <ScrollView className="flex-1">
         {/* Calendar */}

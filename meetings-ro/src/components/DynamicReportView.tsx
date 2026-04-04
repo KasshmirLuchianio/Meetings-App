@@ -198,7 +198,7 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
   if (!meeting) {
     return (
       <View className="flex-1 bg-ivory">
-        <TopBar onMenuPress={() => {}} />
+        <TopBar showBack />
         <View className="flex-1 justify-center items-center px-4">
           <Text className="text-navy text-xl font-heading mb-2">Întâlnire negăsită</Text>
           <Text className="text-gray-600 font-body text-center">
@@ -247,7 +247,7 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
 
   return (
     <View className="flex-1 bg-ivory">
-      <TopBar />
+      <TopBar showBack />
       <ScrollView
         className="flex-1 px-4 py-4"
         refreshControl={

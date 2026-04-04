@@ -9,6 +9,15 @@ import { COLORS } from '../constants/theme';
 
 const STORAGE_KEY = 'selected_vertical';
 
+const FALLBACK_VERTICALS = [
+  { name: 'GAL', display_name_ro: 'GAL', icon: '🏛️', description_ro: 'Ședințe și rapoarte pentru Grupuri de Acțiune Locală', color_accent: '#1B2A4A' },
+  { name: 'JOURNALISM', display_name_ro: 'Jurnalism', icon: '📰', description_ro: 'Interviuri, declarații și materiale jurnalistice', color_accent: '#B8962E' },
+  { name: 'LEGAL', display_name_ro: 'Legal', icon: '⚖️', description_ro: 'Consultări juridice și negocieri contractuale', color_accent: '#8B4513' },
+  { name: 'BANKING', display_name_ro: 'Banking', icon: '🏦', description_ro: 'Ședințe bancare și financiare cu focus pe compliance', color_accent: '#2C5F2D' },
+  { name: 'HEALTHCARE', display_name_ro: 'Sănătate', icon: '🏥', description_ro: 'Consultații medicale, rapoarte clinice și ședințe medicale', color_accent: '#DC2626' },
+  { name: 'STARTUPS', display_name_ro: 'Startups & Tech', icon: '🚀', description_ro: 'Board meetings, pitch-uri, sprint reviews și ședințe de echipă', color_accent: '#7C3AED' },
+];
+
 export default function VerticalSelector() {
   const [verticals, setVerticals] = useState<VerticalConfig[]>([]);
   const [selectedVertical, setSelectedVertical] = useState<string>('GAL');
@@ -22,10 +31,11 @@ export default function VerticalSelector() {
   const loadVerticals = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/v1/verticals`);
+      if (!response.ok) throw new Error('API not available');
       const data = await response.json();
       setVerticals(data.verticals);
-    } catch (error) {
-      console.error('Failed to load verticals:', error);
+    } catch {
+      setVerticals(FALLBACK_VERTICALS as any);
     } finally {
       setLoading(false);
     }

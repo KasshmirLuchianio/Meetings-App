@@ -1,0 +1,39 @@
+# ============================================================
+# Meetings.ro — Render Deploy Config
+# All-in-one: FastAPI + MongoDB in same container
+# ============================================================
+
+services:
+  - type: web
+    name: meetings-ro-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    region: frankfurt  # eu-central — closest to Romania
+    plan: starter      # $7/mo — 512MB RAM, 0.5 CPU (upgrade to standard for prod)
+    branch: main
+    healthCheckPath: /api/health
+    autoDeploy: true
+
+    # ---------- Persistent disk for MongoDB data + uploads ----------
+    disk:
+      name: meetings-data
+      mountPath: /data                # MongoDB: /data/db, Uploads: /app/uploads symlinked
+      sizeGB: 10                      # 10GB — sufficient for ~5000 meetings
+
+    # ---------- Environment variables ----------
+    envVars:
+      - key: MONGO_URL
+        value: mongodb://localhost:27017
+      - key: DB_NAME
+        value: gal_meetings
+      - key: EMERGENT_LLM_KEY
+        sync: false                   # Set manually in Render dashboard
+      - key: STRIPE_SECRET_KEY
+        sync: false                   # Set manually in Render dashboard
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false                   # Set manually in Render dashboard
+      - key: PORT
+        value: "8000"
+      - key: TZ
+        value: Europe/Bucharest

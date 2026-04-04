@@ -1,6 +1,38 @@
 // Core types pentru Meetings.ro
 
-export type VerticalType = 'GAL' | 'JOURNALISM' | 'LEGAL' | 'BANKING';
+export type VerticalType = 'GAL' | 'JOURNALISM' | 'LEGAL' | 'BANKING' | 'HEALTHCARE' | 'STARTUPS';
+
+// Pricing tiers
+export type PricingTier = 'FREE' | 'PRO' | 'ENTERPRISE';
+
+export interface PricingPlan {
+  tier: PricingTier;
+  name: string;
+  price_monthly: number;
+  price_yearly: number;
+  meetings_per_month: number | null; // null = unlimited
+  max_duration_minutes: number;
+  verticals: VerticalType[] | 'all';
+  features: string[];
+  highlight?: boolean;
+}
+
+// User & Auth
+export interface User {
+  _id: string;
+  email: string;
+  name: string;
+  company?: string;
+  plan: PricingTier;
+  meetings_used_this_month: number;
+  created_at: string;
+}
+
+export interface AuthTokens {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+}
 
 export type MeetingStatus = 'pending' | 'uploading' | 'processing' | 'done' | 'error';
 

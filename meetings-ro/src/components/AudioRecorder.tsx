@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, Pressable, Animated } from 'react-native';
+import { View, Text, Pressable, Animated, Linking, Alert } from 'react-native';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
-import { Mic, Square } from 'lucide-react-native';
+import { Mic, Square, Settings } from 'lucide-react-native';
 import { COLORS, TOUCH_TARGET } from '../constants/theme';
 import { RECORDING_CONFIG } from '../constants/config';
 
@@ -90,9 +90,20 @@ export default function AudioRecorder({ onRecordingComplete }: RecorderProps) {
     try {
       // Request permissions
       if (permissionResponse?.status !== 'granted') {
-        const { status } = await requestPermission();
+        const { status, canAskAgain } = await requestPermission();
         if (status !== 'granted') {
-          alert('Permisiune microfon necesară pentru înregistrare');
+          if (!canAskAgain) {
+            Alert.alert(
+              'Permisiune necesară',
+              'Accesul la microfon a fost blocat. Deschide Setările aplicației pentru a-l activa.',
+              [
+                { text: 'Anulează', style: 'cancel' },
+                { text: 'Deschide Setări', onPress: () => Linking.openSettings() },
+              ]
+            );
+          } else {
+            alert('Permisiune microfon necesară pentru înregistrare');
+          }
           return;
         }
       }

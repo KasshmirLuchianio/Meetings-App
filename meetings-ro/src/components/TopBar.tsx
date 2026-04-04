@@ -1,33 +1,33 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
-import { DrawerNavigationProp } from '@react-navigation/drawer';
 import * as Haptics from 'expo-haptics';
-import { Menu, Calendar } from 'lucide-react-native';
+import { Menu, Calendar, ArrowLeft } from 'lucide-react-native';
+import { useDrawer } from '../context/DrawerContext';
 
 interface TopBarProps {
-  onMenuPress?: () => void;
+  showBack?: boolean;
 }
 
-export default function TopBar({ onMenuPress }: TopBarProps) {
+export default function TopBar({ showBack }: TopBarProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation<DrawerNavigationProp<any>>();
+  const { toggleDrawer } = useDrawer();
 
   const handleCalendarPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    router.push('/calendar');
+    router.navigate('/calendar');
   };
 
   const handleMenuPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (onMenuPress) {
-      onMenuPress();
-    } else {
-      navigation.openDrawer();
-    }
+    toggleDrawer();
+  };
+
+  const handleBackPress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.back();
   };
 
   return (
@@ -36,12 +36,19 @@ export default function TopBar({ onMenuPress }: TopBarProps) {
       className="bg-ivory border-b border-gray-200"
     >
       <View className="flex-row items-center justify-between px-4 h-14">
-        {/* Logo */}
-        <Text className="text-navy text-xl font-heading">Meetings.ro</Text>
+        <View className="flex-row items-center gap-2">
+          {showBack && (
+            <Pressable
+              onPress={handleBackPress}
+              className="h-11 w-11 items-center justify-center rounded-full active:bg-navy/10"
+            >
+              <ArrowLeft size={24} stroke="#1B2A4A" />
+            </Pressable>
+          )}
+          <Text className="text-navy text-xl font-heading">Meetings.ro</Text>
+        </View>
 
-        {/* Right actions */}
         <View className="flex-row items-center gap-3">
-          {/* Calendar button */}
           <Pressable
             onPress={handleCalendarPress}
             className="h-11 w-11 items-center justify-center rounded-full active:bg-navy/10"
@@ -49,7 +56,6 @@ export default function TopBar({ onMenuPress }: TopBarProps) {
             <Calendar size={24} stroke="#1B2A4A" />
           </Pressable>
 
-          {/* Menu button */}
           <Pressable
             onPress={handleMenuPress}
             className="h-11 w-11 items-center justify-center rounded-full active:bg-navy/10"

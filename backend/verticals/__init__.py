@@ -5,6 +5,8 @@ from .gal import GAL_CONFIG
 from .journalism import JOURNALISM_CONFIG
 from .legal import LEGAL_CONFIG
 from .banking import BANKING_CONFIG
+from .healthcare import HEALTHCARE_CONFIG
+from .startups import STARTUPS_CONFIG
 from .base import VerticalConfig
 
 
@@ -13,6 +15,8 @@ VERTICALS = {
     "JOURNALISM": JOURNALISM_CONFIG,
     "LEGAL": LEGAL_CONFIG,
     "BANKING": BANKING_CONFIG,
+    "HEALTHCARE": HEALTHCARE_CONFIG,
+    "STARTUPS": STARTUPS_CONFIG,
 }
 
 
