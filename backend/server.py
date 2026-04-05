@@ -547,6 +547,7 @@ async def transcribe_audio(file_path: str) -> dict:
             file=audio_file,
             response_format="verbose_json",
             language="ro",
+            prompt="Aceasta este o înregistrare a unei ședințe în limba română. Participanții vorbesc clar și discută subiecte profesionale.",
             temperature=0.0,
         )
 
