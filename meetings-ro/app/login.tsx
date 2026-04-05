@@ -104,29 +104,6 @@ export default function LoginScreen() {
           </View>
         ) : null}
 
-        {/* Resend verification button */}
-        {needsVerification && (
-          <View className="mb-4">
-            <Pressable
-              onPress={handleResendVerification}
-              disabled={isResending}
-              className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex-row items-center justify-center gap-2"
-            >
-              {isResending ? (
-                <ActivityIndicator size="small" color={COLORS.navy} />
-              ) : (
-                <RefreshCw size={16} color={COLORS.navy} />
-              )}
-              <Text className="text-navy font-body text-sm font-medium">
-                Retrimite email de confirmare
-              </Text>
-            </Pressable>
-            {resendMessage ? (
-              <Text className="text-gray-600 font-body text-xs text-center mt-2">{resendMessage}</Text>
-            ) : null}
-          </View>
-        )}
-
         {/* Email */}
         <View className="mb-4">
           <Text className="text-navy font-body text-sm mb-2 font-medium">Email</Text>
@@ -167,6 +144,29 @@ export default function LoginScreen() {
             </Pressable>
           </View>
         </View>
+
+        {/* Resend verification — only after 403 email_not_verified */}
+        {needsVerification && (
+          <View className="mb-4">
+            <Pressable
+              onPress={handleResendVerification}
+              disabled={isResending || !email.trim()}
+              className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex-row items-center justify-center gap-2"
+            >
+              {isResending ? (
+                <ActivityIndicator size="small" color={COLORS.navy} />
+              ) : (
+                <RefreshCw size={16} color={COLORS.navy} />
+              )}
+              <Text className="text-navy font-body text-sm font-medium">
+                Retrimite email de confirmare
+              </Text>
+            </Pressable>
+            {resendMessage ? (
+              <Text className="text-green-600 font-body text-xs text-center mt-2">{resendMessage}</Text>
+            ) : null}
+          </View>
+        )}
 
         {/* Login Button */}
         <Pressable

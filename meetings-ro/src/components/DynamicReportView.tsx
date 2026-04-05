@@ -6,6 +6,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { RefreshCw, Download, FileText } from 'lucide-react-native';
 import { API_BASE_URL } from '../constants/config';
+import { useAuth } from '../context/AuthContext';
 import TopBar from '../components/TopBar';
 import { COLORS } from '../constants/theme';
 
@@ -76,10 +77,12 @@ const STATUS_COLORS: Record<string, string> = {
 const FINAL_STATUSES = ['processed', 'done', 'failed', 'error'];
 
 export default function DynamicReportView({ meetingId }: { meetingId: string }) {
+  const { token } = useAuth();
   const [meeting, setMeeting] = useState<any>(null);
   const [verticalConfig, setVerticalConfig] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [exporting, setExporting] = useState<'pdf' | 'docx' | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -113,25 +116,42 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
     };
   }, [meeting?.status]);
 
+  const safeFetchJson = async (url: string) => {
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(url, { headers });
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      console.error('Backend returned non-JSON:', text.substring(0, 200));
+      throw new Error(`Server error: ${res.status}`);
+    }
+  };
+
   const loadMeetingData = async (silent: boolean = false) => {
     try {
       if (!silent) {
         setLoading(true);
+        setLoadError('');
       }
 
       // Load meeting
-      const meetingRes = await fetch(`${API_BASE_URL}/api/meetings/${meetingId}`);
-      const meetingData = await meetingRes.json();
+      const meetingData = await safeFetchJson(`${API_BASE_URL}/api/meetings/${meetingId}`);
       setMeeting(meetingData);
 
       // Load vertical config
       const verticalType = meetingData.vertical_type || 'GAL';
-      const verticalsRes = await fetch(`${API_BASE_URL}/api/v1/verticals`);
-      const verticalsData = await verticalsRes.json();
-      const config = verticalsData.verticals.find((v: any) => v.name === verticalType);
-      setVerticalConfig(config);
-    } catch (error) {
+      try {
+        const verticalsData = await safeFetchJson(`${API_BASE_URL}/api/v1/verticals`);
+        const config = verticalsData.verticals?.find((v: any) => v.name === verticalType);
+        setVerticalConfig(config);
+      } catch {
+        // Vertical config is non-critical
+      }
+    } catch (error: any) {
       console.error('Failed to load meeting:', error);
+      setLoadError(error.message || 'Nu am putut încărca întâlnirea');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -208,7 +228,7 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
         <View className="flex-1 justify-center items-center px-4">
           <Text className="text-navy text-xl font-heading mb-2">Întâlnire negăsită</Text>
           <Text className="text-gray-600 font-body text-center">
-            Nu am putut încărca detaliile întâlnirii
+            {loadError || 'Nu am putut încărca detaliile întâlnirii'}
           </Text>
         </View>
       </View>
@@ -251,6 +271,19 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
   const statusColor = STATUS_COLORS[meeting.status] || '#6B7280';
   const isProcessing = !FINAL_STATUSES.includes(meeting.status);
 
+  const formatMeetingDate = (dateStr: string) => {
+    try {
+      const d = new Date(dateStr);
+      const months = ['ianuarie','februarie','martie','aprilie','mai','iunie','iulie','august','septembrie','octombrie','noiembrie','decembrie'];
+      const day = d.getDate();
+      const month = months[d.getMonth()];
+      const year = d.getFullYear();
+      const hours = String(d.getHours()).padStart(2, '0');
+      const mins = String(d.getMinutes()).padStart(2, '0');
+      return `${day} ${month} ${year}, ${hours}:${mins}`;
+    } catch { return ''; }
+  };
+
   return (
     <View className="flex-1 bg-ivory">
       <TopBar showBack />
@@ -272,6 +305,11 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
               <Text className="text-navy text-2xl font-heading mb-1">
                 {meeting.title || 'Fără titlu'}
               </Text>
+              {meeting.created_at && (
+                <Text className="text-gray-400 font-body text-xs mb-1">
+                  {formatMeetingDate(meeting.created_at)}
+                </Text>
+              )}
               {meeting.locality && (
                 <Text className="text-gray-600 font-body">📍 {meeting.locality}</Text>
               )}

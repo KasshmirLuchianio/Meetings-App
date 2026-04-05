@@ -187,12 +187,15 @@ def build_verification_email(verify_token: str) -> str:
 
 def send_verification_email(email: str, verify_token: str):
     """Send verification email via Resend."""
-    resend.Emails.send({
-        "from": "Meetings.ro <noreply@resend.dev>",
-        "to": email,
+    print(f"[EMAIL] RESEND_API_KEY present: {bool(os.environ.get('RESEND_API_KEY'))}")
+    params: resend.Emails.SendParams = {
+        "from": "Meetings.ro <onboarding@resend.dev>",
+        "to": [email],
         "subject": "Confirmă contul tău Meetings.ro",
         "html": build_verification_email(verify_token),
-    })
+    }
+    email_response = resend.Emails.send(params)
+    print(f"[EMAIL] Sent to {email}: {email_response}")
 
 
 # ==================== HELPERS ====================
@@ -557,7 +560,7 @@ async def extract_meeting_data(transcript: str, vertical_type: str = "GAL") -> d
     vertical_config = get_vertical_config(vertical_type)
 
     response = await anthropic_client.messages.create(
-        model="claude-sonnet-4-5-20250929",
+        model="claude-sonnet-4-5-20250514",
         max_tokens=2000,
         system=vertical_config.prompt_template,
         messages=[{
@@ -620,38 +623,38 @@ async def process_meeting(meeting_id: str):
             }}
         )
         
-        # Step 2: Extract structured data (GAL format)
-        print(f"[Meetings.ro] Extracting data for meeting {meeting_id}...")
+        # Step 2: Extract structured data via Claude
         vertical_type = meeting.get("vertical_type", "GAL")
+        print(f"[Meetings.ro] Extracting data for meeting {meeting_id} (vertical: {vertical_type})...")
         extracted = await extract_meeting_data(transcription["text"], vertical_type)
-        
+        print(f"[Meetings.ro] Extracted fields: {list(extracted.keys())}")
+
         # Determine locality
-        locality = extracted.get("locality") or "Necunoscut"
-        
+        locality = extracted.get("locality") or extracted.get("loc_desfasurare") or "Necunoscut"
+
         # Generate title: DD.MM.YYYY | Localitatea
         created_at = meeting.get("created_at", datetime.now(timezone.utc))
         if isinstance(created_at, str):
             created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
         title = f"{created_at.strftime('%d.%m.%Y')} | {locality}"
-        
-        # Update meeting with GAL structured data
+
+        # Build update data — GAL fields at top level + vertical_config for all verticals
         update_data = {
             "title": title,
             "locality": locality,
-            "data_desfasurare": extracted.get("data_desfasurare"),
-            "format_intalnire": extracted.get("format_intalnire"),
-            "loc_desfasurare": extracted.get("loc_desfasurare"),
-            "mod_promovare": extracted.get("mod_promovare"),
-            "obiectiv": extracted.get("obiectiv"),
-            "tematica": extracted.get("tematica"),
-            "scurta_descriere": extracted.get("scurta_descriere"),
-            "numar_participanti": extracted.get("numar_participanti"),
-            "concluzia": extracted.get("concluzia"),
+            "vertical_config": extracted,
             "status": "done",
             "error": None,
             "updated_at": datetime.now(timezone.utc)
         }
-        
+
+        # Also save GAL-specific fields at top level for backward compatibility
+        for field in ["data_desfasurare", "format_intalnire", "loc_desfasurare",
+                       "mod_promovare", "obiectiv", "tematica", "scurta_descriere",
+                       "numar_participanti", "concluzia"]:
+            if field in extracted:
+                update_data[field] = extracted[field]
+
         await meetings_col.update_one(
             {"_id": ObjectId(meeting_id)},
             {"$set": update_data}
