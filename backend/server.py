@@ -344,6 +344,18 @@ async def auth_login(req: LoginRequest):
     }
 
 
+# ---- ADMIN: Delete user by email (for testing) ----
+@app.delete("/api/admin/delete-user")
+async def admin_delete_user(email: str = Query(...), admin_key: str = Query(...)):
+    """Delete a user by email. Requires admin key."""
+    if admin_key != os.environ.get("JWT_SECRET", ""):
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    result = await users_col.delete_one({"email": email})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"message": f"User {email} deleted", "deleted": result.deleted_count}
+
+
 @app.get("/api/auth/me")
 async def auth_me(request: Request):
     """Get current authenticated user."""
