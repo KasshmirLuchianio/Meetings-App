@@ -31,6 +31,7 @@ MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "gal_meetings")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 # ==================== STRIPE ====================
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
@@ -500,22 +501,37 @@ class MeetingUpdate(BaseModel):
 
 
 # ==================== AI CLIENTS ====================
-openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+# Groq for transcription (Whisper), OpenAI as fallback
+groq_client = AsyncOpenAI(
+    api_key=GROQ_API_KEY,
+    base_url="https://api.groq.com/openai/v1",
+) if GROQ_API_KEY else None
+openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 
 
 # ==================== AI PROCESSING ====================
 async def transcribe_audio(file_path: str) -> dict:
-    """Transcribe audio using OpenAI Whisper SDK."""
+    """Transcribe audio using Groq Whisper (primary) or OpenAI Whisper (fallback)."""
+    # Pick client: Groq first, then OpenAI
+    if groq_client:
+        client = groq_client
+        model = "whisper-large-v3"
+        print("[Transcribe] Using Groq Whisper")
+    elif openai_client:
+        client = openai_client
+        model = "whisper-1"
+        print("[Transcribe] Using OpenAI Whisper")
+    else:
+        raise RuntimeError("Nicio cheie API pentru transcriere configurată (GROQ_API_KEY sau OPENAI_API_KEY)")
+
     with open(file_path, "rb") as audio_file:
-        response = await openai_client.audio.transcriptions.create(
-            model="whisper-1",
+        response = await client.audio.transcriptions.create(
+            model=model,
             file=audio_file,
             response_format="verbose_json",
             language="ro",
-            prompt="Aceasta este o ședință de lucru despre proiecte de infrastructură în Delta Dunării. Localități: Crișan, Maliuc, Sulina, Tulcea, Chilia Veche, Letea.",
             temperature=0.0,
-            timestamp_granularities=["segment"]
         )
 
     transcript_text = response.text
