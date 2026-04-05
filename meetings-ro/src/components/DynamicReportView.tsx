@@ -57,7 +57,9 @@ const STATUS_LABELS: Record<string, string> = {
   transcribing: 'Transcriere',
   processing: 'Procesare',
   processed: 'Finalizat',
+  done: 'Finalizat',
   failed: 'Eșuat',
+  error: 'Eșuat',
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -66,8 +68,12 @@ const STATUS_COLORS: Record<string, string> = {
   transcribing: '#8B5CF6',
   processing: '#10B981',
   processed: '#059669',
+  done: '#059669',
   failed: '#EF4444',
+  error: '#EF4444',
 };
+
+const FINAL_STATUSES = ['processed', 'done', 'failed', 'error'];
 
 export default function DynamicReportView({ meetingId }: { meetingId: string }) {
   const [meeting, setMeeting] = useState<any>(null);
@@ -90,7 +96,7 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
 
   useEffect(() => {
     // Start/stop polling based on status
-    if (meeting && !['processed', 'failed'].includes(meeting.status)) {
+    if (meeting && !FINAL_STATUSES.includes(meeting.status)) {
       // Poll every 5 seconds for status updates
       pollingRef.current = setInterval(() => {
         loadMeetingData(true);
@@ -139,7 +145,7 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
   };
 
   const handleExport = async (format: 'pdf' | 'docx') => {
-    if (!meeting || meeting.status !== 'processed') {
+    if (!meeting || (meeting.status !== 'processed' && meeting.status !== 'done')) {
       Alert.alert(
         'Export indisponibil',
         'Exportul este disponibil doar pentru întâlniri finalizate.'
@@ -243,7 +249,7 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
   };
 
   const statusColor = STATUS_COLORS[meeting.status] || '#6B7280';
-  const isProcessing = !['processed', 'failed'].includes(meeting.status);
+  const isProcessing = !FINAL_STATUSES.includes(meeting.status);
 
   return (
     <View className="flex-1 bg-ivory">
@@ -295,8 +301,16 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
             </View>
           )}
 
+          {/* Error message */}
+          {(meeting.status === 'error' || meeting.status === 'failed') && meeting.error && (
+            <View className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4">
+              <Text className="text-red-700 text-sm font-heading mb-1">Eroare la procesare</Text>
+              <Text className="text-red-600 text-xs font-body">{meeting.error}</Text>
+            </View>
+          )}
+
           {/* Export buttons */}
-          {meeting.status === 'processed' && (
+          {(meeting.status === 'processed' || meeting.status === 'done') && (
             <View className="flex-row gap-2 mb-4">
               <Pressable
                 onPress={() => handleExport('pdf')}
