@@ -5,22 +5,26 @@ import { API_BASE_URL } from '../constants/config';
 
 interface AuthContextType {
   user: User | null;
+  token: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   updatePlan: (plan: PricingTier) => void;
+  refreshUsage: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
+  token: null,
   isLoading: true,
   isAuthenticated: false,
   login: async () => {},
   register: async () => {},
   logout: async () => {},
   updatePlan: () => {},
+  refreshUsage: async () => {},
 });
 
 const TOKEN_KEY = 'auth_token';
@@ -28,6 +32,7 @@ const USER_KEY = 'auth_user';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -40,6 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const savedUser = await AsyncStorage.getItem(USER_KEY);
 
       if (token && savedUser) {
+        setAuthToken(token);
         // Verify token is still valid by calling /api/auth/me
         try {
           const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
@@ -51,6 +57,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             await AsyncStorage.setItem(USER_KEY, JSON.stringify(data.user));
           } else {
             // Token expired or invalid — clear session
+            setAuthToken(null);
             await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
           }
         } catch {
@@ -79,6 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const data = await res.json();
     setUser(data.user);
+    setAuthToken(data.token);
     await AsyncStorage.setItem(TOKEN_KEY, data.token);
     await AsyncStorage.setItem(USER_KEY, JSON.stringify(data.user));
   };
@@ -97,12 +105,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const data = await res.json();
     setUser(data.user);
+    setAuthToken(data.token);
     await AsyncStorage.setItem(TOKEN_KEY, data.token);
     await AsyncStorage.setItem(USER_KEY, JSON.stringify(data.user));
   };
 
   const logout = async () => {
     setUser(null);
+    setAuthToken(null);
     await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
   };
 
@@ -114,16 +124,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const refreshUsage = async () => {
+    if (!authToken) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/users/me/usage`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (user) {
+          const updated = { ...user, meetings_used_this_month: data.meetings_used, plan: data.plan };
+          setUser(updated);
+          await AsyncStorage.setItem(USER_KEY, JSON.stringify(updated));
+        }
+      }
+    } catch {
+      // Silent fail — usage refresh is best-effort
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
         user,
+        token: authToken,
         isLoading,
         isAuthenticated: !!user,
         login,
         register,
         logout,
         updatePlan,
+        refreshUsage,
       }}
     >
       {children}

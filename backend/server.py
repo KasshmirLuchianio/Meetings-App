@@ -70,6 +70,13 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "meetings-ro-secret-change-in-producti
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 72  # 3 days
 
+# ==================== PLAN LIMITS ====================
+PLAN_LIMITS = {
+    "FREE": {"meetings_per_month": 5},
+    "PRO": {"meetings_per_month": 100},
+    "ENTERPRISE": {"meetings_per_month": None},  # Unlimited
+}
+
 # ==================== DATABASE ====================
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
@@ -114,6 +121,43 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Token expirat")
     except (jwt.InvalidTokenError, Exception):
         raise HTTPException(status_code=401, detail="Token invalid")
+
+
+# ==================== PLAN LIMIT HELPERS ====================
+async def reset_monthly_if_needed(user: dict) -> dict:
+    """Reset meetings_used_this_month if we're in a new month."""
+    last_reset = user.get("last_monthly_reset")
+    now = datetime.now(timezone.utc)
+    if last_reset is None or (isinstance(last_reset, datetime) and last_reset.month != now.month or last_reset.year != now.year):
+        await users_col.update_one(
+            {"_id": user["_id"]},
+            {"$set": {"meetings_used_this_month": 0, "last_monthly_reset": now}}
+        )
+        user["meetings_used_this_month"] = 0
+        user["last_monthly_reset"] = now
+    return user
+
+
+async def check_plan_limit(user: dict):
+    """Check if user has reached their plan limit. Raises 402 if exceeded."""
+    user = await reset_monthly_if_needed(user)
+    plan = user.get("plan", "FREE")
+    limit = PLAN_LIMITS.get(plan, PLAN_LIMITS["FREE"])["meetings_per_month"]
+    if limit is not None:
+        used = user.get("meetings_used_this_month", 0)
+        if used >= limit:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Ai atins limita de {limit} întâlniri/lună pentru planul {plan}. Fă upgrade pentru mai multe."
+            )
+
+
+async def increment_usage(user_id) -> None:
+    """Increment meetings_used_this_month for a user."""
+    await users_col.update_one(
+        {"_id": user_id},
+        {"$inc": {"meetings_used_this_month": 1}}
+    )
 
 
 # ==================== HELPERS ====================
@@ -260,6 +304,26 @@ async def auth_me(request: Request):
             "meetings_used_this_month": user.get("meetings_used_this_month", 0),
             "created_at": user["created_at"].isoformat() if isinstance(user.get("created_at"), datetime) else str(user.get("created_at", "")),
         }
+    }
+
+
+# ==================== USAGE ENDPOINT ====================
+@app.get("/api/users/me/usage")
+async def get_user_usage(request: Request):
+    """Get current user's plan usage stats."""
+    user = await get_current_user(request)
+    user = await reset_monthly_if_needed(user)
+    plan = user.get("plan", "FREE")
+    limit_info = PLAN_LIMITS.get(plan, PLAN_LIMITS["FREE"])
+    limit = limit_info["meetings_per_month"]
+    used = user.get("meetings_used_this_month", 0)
+
+    return {
+        "plan": plan,
+        "meetings_used": used,
+        "meetings_limit": limit,  # None = unlimited
+        "meetings_remaining": (limit - used) if limit is not None else None,
+        "percentage": round((used / limit) * 100, 1) if limit else 0,
     }
 
 
@@ -480,13 +544,17 @@ async def health():
 # ---- MEETINGS CRUD ----
 
 @app.post("/api/meetings")
-async def create_meeting(data: MeetingCreate = None):
-    """Create a new meeting placeholder."""
+async def create_meeting(request: Request, data: MeetingCreate = None):
+    """Create a new meeting placeholder (auth + plan limit enforced)."""
+    # Auth + plan limit check
+    user = await get_current_user(request)
+    await check_plan_limit(user)
+
     now = datetime.now(timezone.utc)
-    
+
     # Get vertical_type from request or default to GAL
     vertical_type = data.vertical_type if data and hasattr(data, 'vertical_type') else "GAL"
-    
+
     meeting = {
         "title": (data.title if data and data.title else None),
         "locality": (data.locality if data and data.locality else None),
@@ -508,6 +576,7 @@ async def create_meeting(data: MeetingCreate = None):
         # Vertical system
         "vertical_type": vertical_type,
         "vertical_config": {},
+        "user_id": str(user["_id"]),
         "status": "pending",
         "error": None,
         "duration": 0,
@@ -516,6 +585,10 @@ async def create_meeting(data: MeetingCreate = None):
     }
     result = await meetings_col.insert_one(meeting)
     meeting["_id"] = result.inserted_id
+
+    # Increment usage counter
+    await increment_usage(user["_id"])
+
     return serialize_doc(meeting)
 
 

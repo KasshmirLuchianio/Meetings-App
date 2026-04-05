@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, Redirect } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import TopBar from '../src/components/TopBar';
 import AudioRecorder from '../src/components/AudioRecorder';
 import AudioUploader from '../src/components/AudioUploader';
-import { Mic, Upload, ChevronRight, Crown } from 'lucide-react-native';
+import { Mic, Upload, ChevronRight, Crown, AlertTriangle } from 'lucide-react-native';
 import { COLORS } from '../src/constants/theme';
 import { API_BASE_URL, PRICING_PLANS } from '../src/constants/config';
 import { useAuth } from '../src/context/AuthContext';
@@ -24,15 +24,39 @@ const VERTICAL_LABELS: Record<string, string> = {
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { isAuthenticated, isLoading, user } = useAuth();
+  const { isAuthenticated, isLoading, user, token, refreshUsage } = useAuth();
   const [activeTab, setActiveTab] = useState<'record' | 'upload'>('record');
   const [verticalType, setVerticalType] = useState<string>('GAL');
+  const [showLimitModal, setShowLimitModal] = useState(false);
+  const [limitMessage, setLimitMessage] = useState('');
+  const [usageData, setUsageData] = useState<{ used: number; limit: number | null; percentage: number } | null>(null);
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then((saved) => {
       if (saved) setVerticalType(saved);
     }).catch(() => {});
   }, []);
+
+  // Fetch real usage data from backend
+  useEffect(() => {
+    if (!token) return;
+    const fetchUsage = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/users/me/usage`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setUsageData({
+            used: data.meetings_used,
+            limit: data.meetings_limit,
+            percentage: data.percentage,
+          });
+        }
+      } catch {}
+    };
+    fetchUsage();
+  }, [token, user?.meetings_used_this_month]);
 
   if (isLoading) {
     return (
@@ -47,17 +71,28 @@ export default function HomeScreen() {
   }
 
   const currentPlan = PRICING_PLANS.find((p) => p.tier === user?.plan) || PRICING_PLANS[0];
-  const meetingsLeft = currentPlan.meetings_per_month
-    ? currentPlan.meetings_per_month - (user?.meetings_used_this_month || 0)
-    : null;
+  const used = usageData?.used ?? (user?.meetings_used_this_month || 0);
+  const limit = usageData?.limit ?? currentPlan.meetings_per_month ?? null;
+  const meetingsLeft = limit !== null ? limit - used : null;
+  const usagePercent = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  const usageColor = usagePercent >= 100 ? '#EF4444' : usagePercent >= 80 ? '#F59E0B' : '#22C55E';
 
   const handleRecordingComplete = async (uri: string, duration: number) => {
     try {
       const createRes = await fetch(`${API_BASE_URL}/api/meetings`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ vertical_type: verticalType }),
       });
+      if (createRes.status === 402) {
+        const err = await createRes.json().catch(() => ({ detail: '' }));
+        setLimitMessage(err.detail || 'Ai atins limita planului tău.');
+        setShowLimitModal(true);
+        return;
+      }
       if (!createRes.ok) throw new Error('Failed to create meeting');
       const meeting = await createRes.json();
 
@@ -70,9 +105,11 @@ export default function HomeScreen() {
 
       const uploadRes = await fetch(`${API_BASE_URL}/api/meetings/${meeting._id}/upload`, {
         method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
       if (!uploadRes.ok) throw new Error('Failed to upload');
+      await refreshUsage();
       router.push(`/meeting/${meeting._id}`);
     } catch {
       alert('Eroare la încărcarea înregistrării');
@@ -104,30 +141,50 @@ export default function HomeScreen() {
         </View>
 
         {/* Usage Card */}
-        <View className="bg-white rounded-2xl p-4 mb-5 flex-row items-center justify-between">
-          <View className="flex-row items-center gap-3">
-            <View className="w-10 h-10 bg-navy/10 rounded-lg items-center justify-center">
-              <Crown size={18} color={COLORS.navy} />
+        <View className="bg-white rounded-2xl p-4 mb-5">
+          <View className="flex-row items-center justify-between mb-3">
+            <View className="flex-row items-center gap-3">
+              <View className="w-10 h-10 bg-navy/10 rounded-lg items-center justify-center">
+                <Crown size={18} color={COLORS.navy} />
+              </View>
+              <View>
+                <Text className="text-navy font-heading text-sm">{currentPlan.name}</Text>
+                <Text className="text-gray-500 font-body text-xs">
+                  {limit !== null
+                    ? `${used}/${limit} întâlniri folosite`
+                    : 'Întâlniri nelimitate'}
+                </Text>
+              </View>
             </View>
+            {user?.plan === 'FREE' && (
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  router.push('/pricing');
+                }}
+                className="bg-gold/15 rounded-lg px-3 py-1.5"
+              >
+                <Text className="text-gold font-body text-xs font-medium">Upgrade</Text>
+              </Pressable>
+            )}
+          </View>
+          {/* Progress Bar */}
+          {limit !== null && (
             <View>
-              <Text className="text-navy font-heading text-sm">{currentPlan.name}</Text>
-              <Text className="text-gray-500 font-body text-xs">
-                {meetingsLeft !== null
-                  ? `${meetingsLeft} întâlniri rămase luna aceasta`
-                  : 'Întâlniri nelimitate'}
+              <View className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                <View
+                  className="h-full rounded-full"
+                  style={{ width: `${usagePercent}%`, backgroundColor: usageColor }}
+                />
+              </View>
+              <Text className="text-xs font-body mt-1.5" style={{ color: usageColor }}>
+                {meetingsLeft !== null && meetingsLeft > 0
+                  ? `${meetingsLeft} întâlniri rămase`
+                  : meetingsLeft === 0
+                  ? 'Limita atinsă — fă upgrade!'
+                  : ''}
               </Text>
             </View>
-          </View>
-          {user?.plan === 'FREE' && (
-            <Pressable
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                router.push('/pricing');
-              }}
-              className="bg-gold/15 rounded-lg px-3 py-1.5"
-            >
-              <Text className="text-gold font-body text-xs font-medium">Upgrade</Text>
-            </Pressable>
           )}
         </View>
 
@@ -182,6 +239,11 @@ export default function HomeScreen() {
             <AudioUploader
               onUploadComplete={handleUploadComplete}
               verticalType={verticalType}
+              authToken={token}
+              onLimitReached={(msg) => {
+                setLimitMessage(msg);
+                setShowLimitModal(true);
+              }}
             />
           )}
         </View>
@@ -205,6 +267,43 @@ export default function HomeScreen() {
           <ChevronRight size={18} color="#9CA3AF" />
         </Pressable>
       </ScrollView>
+
+      {/* Plan Limit Modal */}
+      <Modal
+        visible={showLimitModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLimitModal(false)}
+      >
+        <View className="flex-1 bg-black/50 items-center justify-center px-6">
+          <View className="bg-white rounded-2xl p-6 w-full max-w-sm">
+            <View className="items-center mb-4">
+              <View className="w-14 h-14 bg-red-100 rounded-full items-center justify-center mb-3">
+                <AlertTriangle size={28} color="#EF4444" />
+              </View>
+              <Text className="text-navy text-lg font-heading text-center">Limita atinsă</Text>
+              <Text className="text-gray-500 text-sm font-body text-center mt-2">
+                {limitMessage || 'Ai folosit toate întâlnirile incluse în planul tău.'}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => {
+                setShowLimitModal(false);
+                router.push('/pricing');
+              }}
+              className="bg-navy h-12 rounded-xl items-center justify-center mb-2"
+            >
+              <Text className="text-white font-heading text-sm">Vezi planuri</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setShowLimitModal(false)}
+              className="h-12 rounded-xl items-center justify-center"
+            >
+              <Text className="text-gray-500 font-body text-sm">Închide</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

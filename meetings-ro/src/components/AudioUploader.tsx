@@ -15,9 +15,11 @@ interface UploadProgress {
 interface AudioUploaderProps {
   onUploadComplete: (meetingId: string) => void;
   verticalType?: string;
+  authToken?: string | null;
+  onLimitReached?: (message: string) => void;
 }
 
-export default function AudioUploader({ onUploadComplete, verticalType = 'GAL' }: AudioUploaderProps) {
+export default function AudioUploader({ onUploadComplete, verticalType = 'GAL', authToken, onLimitReached }: AudioUploaderProps) {
   const [selectedFile, setSelectedFile] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<UploadProgress>({
@@ -123,9 +125,23 @@ export default function AudioUploader({ onUploadComplete, verticalType = 'GAL' }
       // Step 1: Create meeting placeholder
       const createResponse = await fetch(`${API_BASE_URL}/api/meetings`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
         body: JSON.stringify({ vertical_type: verticalType }),
       });
+
+      if (createResponse.status === 402) {
+        const err = await createResponse.json().catch(() => ({ detail: '' }));
+        if (onLimitReached) {
+          onLimitReached(err.detail || 'Ai atins limita planului tău.');
+        } else {
+          alert(err.detail || 'Ai atins limita planului tău.');
+        }
+        setUploading(false);
+        return;
+      }
 
       if (!createResponse.ok) {
         throw new Error('Failed to create meeting');

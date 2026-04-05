@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, Text, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { ArrowLeft, User, Mail, Lock, Eye, EyeOff, Building2 } from 'lucide-react-native';
+import { ArrowLeft, User, Mail, Lock, Eye, EyeOff, Building2, Check, X } from 'lucide-react-native';
 import { COLORS } from '../src/constants/theme';
 import { useAuth } from '../src/context/AuthContext';
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -19,27 +21,55 @@ export default function RegisterScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Live password validation
+  const passwordChecks = useMemo(() => ({
+    length: password.length >= 8,
+    uppercase: /[A-Z]/.test(password),
+    digit: /\d/.test(password),
+    symbol: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password),
+  }), [password]);
+
+  const allPasswordValid = passwordChecks.length && passwordChecks.uppercase && passwordChecks.digit && passwordChecks.symbol;
+
   const handleRegister = async () => {
-    if (!name.trim() || !email.trim() || !password.trim()) {
-      setError('Completează câmpurile obligatorii');
+    if (name.trim().length < 2) {
+      setError('Numele trebuie să aibă minim 2 caractere');
       return;
     }
-    if (password.length < 6) {
-      setError('Parola trebuie să aibă minim 6 caractere');
+    if (!EMAIL_REGEX.test(email.trim())) {
+      setError('Email invalid');
       return;
     }
+    if (!allPasswordValid) {
+      setError('Parola nu îndeplinește toate cerințele');
+      return;
+    }
+
     setError('');
     setIsLoading(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       await register(name.trim(), email.trim(), password);
       router.replace('/pricing');
-    } catch {
-      setError('Eroare la înregistrare. Încearcă din nou.');
+    } catch (err: any) {
+      setError(err.message || 'Eroare la înregistrare. Încearcă din nou.');
     } finally {
       setIsLoading(false);
     }
   };
+
+  const PasswordRule = ({ met, label }: { met: boolean; label: string }) => (
+    <View className="flex-row items-center gap-1.5 mt-1">
+      {met ? (
+        <Check size={12} color="#22C55E" />
+      ) : (
+        <X size={12} color="#EF4444" />
+      )}
+      <Text className={`font-body text-xs ${met ? 'text-green-600' : 'text-gray-400'}`}>
+        {label}
+      </Text>
+    </View>
+  );
 
   return (
     <KeyboardAvoidingView
@@ -119,14 +149,14 @@ export default function RegisterScreen() {
         </View>
 
         {/* Password */}
-        <View className="mb-8">
+        <View className="mb-4">
           <Text className="text-navy font-body text-sm mb-2 font-medium">Parolă *</Text>
           <View className="flex-row items-center bg-white rounded-xl border border-gray-200 px-4 h-14">
             <Lock size={18} color="#9CA3AF" />
             <TextInput
               value={password}
               onChangeText={setPassword}
-              placeholder="Minim 6 caractere"
+              placeholder="Minim 8 caractere"
               placeholderTextColor="#9CA3AF"
               secureTextEntry={!showPassword}
               className="flex-1 ml-3 text-navy font-body text-base"
@@ -139,13 +169,22 @@ export default function RegisterScreen() {
               )}
             </Pressable>
           </View>
+          {/* Live password requirements */}
+          {password.length > 0 && (
+            <View className="mt-2 ml-1">
+              <PasswordRule met={passwordChecks.length} label="Minim 8 caractere" />
+              <PasswordRule met={passwordChecks.uppercase} label="O literă mare (A-Z)" />
+              <PasswordRule met={passwordChecks.digit} label="O cifră (0-9)" />
+              <PasswordRule met={passwordChecks.symbol} label="Un simbol (!@#$%^&*)" />
+            </View>
+          )}
         </View>
 
         {/* Register Button */}
         <Pressable
           onPress={handleRegister}
           disabled={isLoading}
-          className="bg-navy h-14 rounded-xl items-center justify-center active:opacity-90"
+          className="bg-navy h-14 rounded-xl items-center justify-center active:opacity-90 mt-4"
         >
           {isLoading ? (
             <ActivityIndicator color="white" />

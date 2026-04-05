@@ -182,10 +182,16 @@ export default function PricingScreen() {
 
                 {/* CTA */}
                 <Pressable
-                  onPress={() => handleSelectPlan(plan.tier as PricingTier)}
-                  disabled={isCurrentPlan || loadingTier === plan.tier}
+                  onPress={() => {
+                    if (isCurrentPlan && plan.tier === 'FREE') {
+                      router.replace('/');
+                    } else if (!isCurrentPlan) {
+                      handleSelectPlan(plan.tier as PricingTier);
+                    }
+                  }}
+                  disabled={isCurrentPlan && plan.tier !== 'FREE' || loadingTier === plan.tier}
                   className={`h-12 rounded-xl items-center justify-center flex-row gap-2 ${
-                    isCurrentPlan
+                    isCurrentPlan && plan.tier !== 'FREE'
                       ? 'bg-gray-200'
                       : isHighlighted
                       ? 'bg-white'
@@ -197,14 +203,16 @@ export default function PricingScreen() {
                   ) : (
                     <Text
                       className={`font-heading text-sm ${
-                        isCurrentPlan
+                        isCurrentPlan && plan.tier !== 'FREE'
                           ? 'text-gray-400'
                           : isHighlighted
                           ? 'text-navy'
                           : 'text-white'
                       }`}
                     >
-                      {isCurrentPlan ? 'Plan activ' : price === 0 ? 'Începe gratuit' : 'Alege planul'}
+                      {isCurrentPlan
+                        ? plan.tier === 'FREE' ? 'Mergi la Home' : 'Plan activ'
+                        : price === 0 ? 'Începe gratuit' : 'Alege planul'}
                     </Text>
                   )}
                 </Pressable>
