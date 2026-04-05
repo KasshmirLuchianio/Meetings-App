@@ -573,7 +573,7 @@ async def extract_meeting_data(transcript: str, vertical_type: str = "GAL") -> d
     vertical_config = get_vertical_config(vertical_type)
 
     response = await anthropic_client.messages.create(
-        model="claude-sonnet-4-5-20250514",
+        model="claude-sonnet-4-5",
         max_tokens=2000,
         system=vertical_config.prompt_template,
         messages=[{
