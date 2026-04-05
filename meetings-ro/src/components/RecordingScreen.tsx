@@ -1,38 +1,32 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Animated, Easing } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Easing } from 'react-native';
 import RecordingOrb from './RecordingOrb';
+import { useRecording } from '../context/RecordingContext';
 
-const { width, height } = Dimensions.get('window');
-
-interface Props {
-  isVisible: boolean;
-  duration: string; // "MM:SS"
-  onStop: () => void;
-}
-
-export default function RecordingScreen({ isVisible, duration, onStop }: Props) {
+export default function RecordingScreen() {
+  const { isRecording, duration, stopRecording } = useRecording();
   const bgOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.timing(bgOpacity, {
-      toValue: isVisible ? 1 : 0,
+      toValue: isRecording ? 1 : 0,
       duration: 600,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
-  }, [isVisible]);
+  }, [isRecording]);
 
-  if (!isVisible && (bgOpacity as any)._value === 0) {
+  if (!isRecording && (bgOpacity as any)._value === 0) {
     return null;
   }
 
   return (
-    <Animated.View style={[styles.container, { opacity: bgOpacity }]} pointerEvents={isVisible ? 'auto' : 'none'}>
+    <Animated.View style={[styles.container, { opacity: bgOpacity }]} pointerEvents={isRecording ? 'auto' : 'none'}>
       <View style={styles.content}>
-        <RecordingOrb isRecording={isVisible} />
+        <RecordingOrb isRecording={isRecording} />
         <Text style={styles.timer}>{duration}</Text>
         <Text style={styles.hint}>Vorbește clar și natural</Text>
-        <TouchableOpacity style={styles.stopButton} onPress={onStop} activeOpacity={0.7}>
+        <TouchableOpacity style={styles.stopButton} onPress={stopRecording} activeOpacity={0.7}>
           <View style={styles.stopIcon} />
         </TouchableOpacity>
         <Text style={styles.stopLabel}>Oprește înregistrarea</Text>
@@ -46,10 +40,13 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     left: 0,
-    width,
-    height,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
     backgroundColor: '#050508',
-    zIndex: 999,
+    zIndex: 9999,
+    elevation: 9999,
     alignItems: 'center',
     justifyContent: 'center',
   },

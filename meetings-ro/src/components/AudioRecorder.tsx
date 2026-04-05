@@ -1,95 +1,84 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, Pressable, Animated, Linking, Alert } from 'react-native';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { View, Text, Pressable, Linking, Alert } from 'react-native';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
-import { Mic, Square, Settings } from 'lucide-react-native';
+import { Mic } from 'lucide-react-native';
 import { COLORS, TOUCH_TARGET } from '../constants/theme';
 import { RECORDING_CONFIG } from '../constants/config';
-import RecordingScreen from './RecordingScreen';
+import { useRecording } from '../context/RecordingContext';
 
 interface RecorderProps {
   onRecordingComplete: (uri: string, duration: number) => void;
 }
 
-const WAVEFORM_BARS = 32;
-const BAR_WIDTH = 3;
-const BAR_GAP = 2;
-const BAR_MAX_HEIGHT = 60;
-const BAR_MIN_HEIGHT = 4;
-
 export default function AudioRecorder({ onRecordingComplete }: RecorderProps) {
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [duration, setDuration] = useState(0);
   const [permissionResponse, requestPermission] = Audio.usePermissions();
-  
+  const durationSecondsRef = useRef(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const meteringRef = useRef<NodeJS.Timeout | null>(null);
-  
-  // Animated values for each bar
-  const barHeights = useRef(
-    Array.from({ length: WAVEFORM_BARS }, () => new Animated.Value(BAR_MIN_HEIGHT))
-  ).current;
+  const recordingRef = useRef<Audio.Recording | null>(null);
+
+  const {
+    isRecording,
+    setIsRecording,
+    setDuration,
+    registerStopHandler,
+  } = useRecording();
+
+  const formatDuration = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const stopRecording = useCallback(async () => {
+    const rec = recordingRef.current;
+    if (!rec) return;
+
+    try {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+
+      setIsRecording(false);
+
+      await rec.stopAndUnloadAsync();
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+      });
+
+      const uri = rec.getURI();
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      if (uri) {
+        onRecordingComplete(uri, durationSecondsRef.current);
+      }
+
+      setRecording(null);
+      recordingRef.current = null;
+      durationSecondsRef.current = 0;
+      setDuration('00:00');
+    } catch (error) {
+      console.error('Failed to stop recording:', error);
+      alert('Eroare la oprirea înregistrării');
+    }
+  }, [onRecordingComplete, setIsRecording, setDuration]);
+
+  // Register stop handler so RecordingScreen can call it
+  useEffect(() => {
+    registerStopHandler(stopRecording);
+  }, [stopRecording, registerStopHandler]);
 
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
-      if (meteringRef.current) clearInterval(meteringRef.current);
     };
   }, []);
 
-  const updateWaveform = async () => {
-    if (!recording) return;
-
-    try {
-      const status = await recording.getStatusAsync();
-      
-      // expo-av metering is in range [-160, 0] dB
-      // We normalize to [0, 1] range
-      let metering = 0;
-      if (status.isRecording && status.metering !== undefined) {
-        // Convert dB to normalized value
-        // -160 dB (silent) -> 0, 0 dB (loud) -> 1
-        metering = Math.max(0, Math.min(1, (status.metering + 160) / 160));
-      } else {
-        // Fallback: generate random values for visual effect
-        metering = Math.random() * 0.3 + 0.1;
-      }
-
-      // Calculate target height based on metering
-      const targetHeight = BAR_MIN_HEIGHT + (BAR_MAX_HEIGHT - BAR_MIN_HEIGHT) * metering;
-
-      // Animate all bars with slight variations
-      barHeights.forEach((barHeight, index) => {
-        // Add variation: center bars more active
-        const centerOffset = Math.abs(index - WAVEFORM_BARS / 2) / (WAVEFORM_BARS / 2);
-        const variation = (1 - centerOffset * 0.3) * (Math.random() * 0.3 + 0.85);
-        const finalHeight = targetHeight * variation;
-
-        Animated.timing(barHeight, {
-          toValue: finalHeight,
-          duration: 100,
-          useNativeDriver: false, // Height is not supported by native driver
-        }).start();
-      });
-    } catch (error) {
-      console.error('Metering error:', error);
-    }
-  };
-
-  const resetWaveform = () => {
-    barHeights.forEach((barHeight) => {
-      Animated.timing(barHeight, {
-        toValue: BAR_MIN_HEIGHT,
-        duration: 200,
-        useNativeDriver: false,
-      }).start();
-    });
-  };
-
   const startRecording = async () => {
     try {
-      // Request permissions
       if (permissionResponse?.status !== 'granted') {
         const { status, canAskAgain } = await requestPermission();
         if (status !== 'granted') {
@@ -109,7 +98,6 @@ export default function AudioRecorder({ onRecordingComplete }: RecorderProps) {
         }
       }
 
-      // Configure audio session — must be set BEFORE creating recording
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
@@ -117,10 +105,8 @@ export default function AudioRecorder({ onRecordingComplete }: RecorderProps) {
         shouldDuckAndroid: true,
       });
 
-      // Small delay to let iOS audio session initialize
       await new Promise((resolve) => setTimeout(resolve, 200));
 
-      // Recording options with metering enabled
       const recordingOptions = {
         android: {
           extension: '.m4a',
@@ -150,79 +136,29 @@ export default function AudioRecorder({ onRecordingComplete }: RecorderProps) {
       const { recording: newRecording } = await Audio.Recording.createAsync(
         recordingOptions as any,
         undefined,
-        100 // Update interval for metering (ms)
+        100
       );
 
       setRecording(newRecording);
+      recordingRef.current = newRecording;
+      durationSecondsRef.current = 0;
+      setDuration('00:00');
       setIsRecording(true);
-      setDuration(0);
 
-      // Haptic feedback
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-      // Start timer
       timerRef.current = setInterval(() => {
-        setDuration((prev) => prev + 1);
+        durationSecondsRef.current += 1;
+        setDuration(formatDuration(durationSecondsRef.current));
       }, 1000);
-
-      // Start metering updates (16.67ms ≈ 60fps)
-      meteringRef.current = setInterval(() => {
-        updateWaveform();
-      }, 16);
     } catch (error) {
       console.error('Failed to start recording:', error);
       alert('Eroare la pornirea înregistrării');
     }
   };
 
-  const stopRecording = async () => {
-    if (!recording) return;
-
-    try {
-      // Stop timers
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-      if (meteringRef.current) {
-        clearInterval(meteringRef.current);
-        meteringRef.current = null;
-      }
-
-      setIsRecording(false);
-      resetWaveform();
-
-      await recording.stopAndUnloadAsync();
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-      });
-
-      const uri = recording.getURI();
-      
-      // Haptic feedback
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-
-      if (uri) {
-        onRecordingComplete(uri, duration);
-      }
-
-      setRecording(null);
-      setDuration(0);
-    } catch (error) {
-      console.error('Failed to stop recording:', error);
-      alert('Eroare la oprirea înregistrării');
-    }
-  };
-
-  const formatDuration = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
   return (
     <View className="items-center">
-      {/* Start recording button (only when not recording) */}
       {!isRecording && (
         <>
           <Pressable
@@ -242,13 +178,6 @@ export default function AudioRecorder({ onRecordingComplete }: RecorderProps) {
           </Text>
         </>
       )}
-
-      {/* Fullscreen recording overlay with glass orb */}
-      <RecordingScreen
-        isVisible={isRecording}
-        duration={formatDuration(duration)}
-        onStop={stopRecording}
-      />
     </View>
   );
 }
