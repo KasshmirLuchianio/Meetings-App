@@ -29,7 +29,7 @@ export default function HomeScreen() {
   const [verticalType, setVerticalType] = useState<string>('GAL');
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [limitMessage, setLimitMessage] = useState('');
-  const [usageData, setUsageData] = useState<{ used: number; limit: number | null; percentage: number } | null>(null);
+  const [usageData, setUsageData] = useState<{ used: number; limit: number; percentage: number } | null>(null);
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then((saved) => {
@@ -72,9 +72,10 @@ export default function HomeScreen() {
 
   const currentPlan = PRICING_PLANS.find((p) => p.tier === user?.plan) || PRICING_PLANS[0];
   const used = usageData?.used ?? (user?.meetings_used_this_month || 0);
-  const limit = usageData?.limit ?? currentPlan.meetings_per_month ?? null;
-  const meetingsLeft = limit !== null ? limit - used : null;
-  const usagePercent = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  const limit = usageData?.limit ?? currentPlan.meetings_limit;
+  const isUnlimited = limit === -1;
+  const meetingsLeft = isUnlimited ? null : limit - used;
+  const usagePercent = isUnlimited ? 0 : (limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0);
   const usageColor = usagePercent >= 100 ? '#EF4444' : usagePercent >= 80 ? '#F59E0B' : '#22C55E';
 
   const handleRecordingComplete = async (uri: string, duration: number) => {
@@ -156,9 +157,9 @@ export default function HomeScreen() {
               <View>
                 <Text className="text-navy font-heading text-sm">{currentPlan.name}</Text>
                 <Text className="text-gray-500 font-body text-xs">
-                  {limit !== null
-                    ? `${used}/${limit} întâlniri folosite`
-                    : 'Întâlniri nelimitate'}
+                  {isUnlimited
+                    ? 'Întâlniri nelimitate'
+                    : `${used}/${limit} întâlniri folosite`}
                 </Text>
               </View>
             </View>
@@ -175,7 +176,7 @@ export default function HomeScreen() {
             )}
           </View>
           {/* Progress Bar */}
-          {limit !== null && (
+          {!isUnlimited && (
             <View>
               <View className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
                 <View

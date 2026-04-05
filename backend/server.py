@@ -78,9 +78,9 @@ JWT_EXPIRATION_HOURS = 72  # 3 days
 
 # ==================== PLAN LIMITS ====================
 PLAN_LIMITS = {
-    "FREE": {"meetings_per_month": 5},
-    "PRO": {"meetings_per_month": 100},
-    "ENTERPRISE": {"meetings_per_month": None},  # Unlimited
+    "free": 5,
+    "pro": 100,
+    "enterprise": -1,
 }
 
 # ==================== DATABASE ====================
@@ -134,7 +134,7 @@ async def reset_monthly_if_needed(user: dict) -> dict:
     """Reset meetings_used_this_month if we're in a new month."""
     last_reset = user.get("last_monthly_reset")
     now = datetime.now(timezone.utc)
-    if last_reset is None or (isinstance(last_reset, datetime) and last_reset.month != now.month or last_reset.year != now.year):
+    if last_reset is None or (isinstance(last_reset, datetime) and (last_reset.month != now.month or last_reset.year != now.year)):
         await users_col.update_one(
             {"_id": user["_id"]},
             {"$set": {"meetings_used_this_month": 0, "last_monthly_reset": now}}
@@ -147,15 +147,16 @@ async def reset_monthly_if_needed(user: dict) -> dict:
 async def check_plan_limit(user: dict):
     """Check if user has reached their plan limit. Raises 402 if exceeded."""
     user = await reset_monthly_if_needed(user)
-    plan = user.get("plan", "FREE")
-    limit = PLAN_LIMITS.get(plan, PLAN_LIMITS["FREE"])["meetings_per_month"]
-    if limit is not None:
-        used = user.get("meetings_used_this_month", 0)
-        if used >= limit:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Ai atins limita de {limit} întâlniri/lună pentru planul {plan}. Fă upgrade pentru mai multe."
-            )
+    plan = user.get("plan", "FREE").lower()
+    limit = PLAN_LIMITS.get(plan, PLAN_LIMITS["free"])
+    if limit == -1:
+        return  # unlimited
+    used = user.get("meetings_used_this_month", 0)
+    if used >= limit:
+        raise HTTPException(
+            status_code=402,
+            detail=f"Ai atins limita de {limit} întâlniri/lună pentru planul tău. Fă upgrade pentru mai multe."
+        )
 
 
 async def increment_usage(user_id) -> None:
@@ -482,16 +483,15 @@ async def get_user_usage(request: Request):
     user = await get_current_user(request)
     user = await reset_monthly_if_needed(user)
     plan = user.get("plan", "FREE")
-    limit_info = PLAN_LIMITS.get(plan, PLAN_LIMITS["FREE"])
-    limit = limit_info["meetings_per_month"]
+    limit = PLAN_LIMITS.get(plan.lower(), PLAN_LIMITS["free"])
     used = user.get("meetings_used_this_month", 0)
 
     return {
         "plan": plan,
         "meetings_used": used,
-        "meetings_limit": limit,  # None = unlimited
-        "meetings_remaining": (limit - used) if limit is not None else None,
-        "percentage": round((used / limit) * 100, 1) if limit else 0,
+        "meetings_limit": limit,  # -1 = unlimited
+        "meetings_remaining": (limit - used) if limit != -1 else -1,
+        "percentage": round((used / limit) * 100, 1) if limit > 0 else 0,
     }
 
 
@@ -634,7 +634,7 @@ async def process_meeting(meeting_id: str):
                 "updated_at": datetime.now(timezone.utc)
             }}
         )
-        
+
         # Step 2: Extract structured data via Claude
         vertical_type = meeting.get("vertical_type", "GAL")
         print(f"[Meetings.ro] Extracting data for meeting {meeting_id} (vertical: {vertical_type})...")

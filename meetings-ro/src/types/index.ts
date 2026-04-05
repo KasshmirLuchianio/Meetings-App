@@ -10,9 +10,8 @@ export interface PricingPlan {
   name: string;
   price_monthly: number;
   price_yearly: number;
-  meetings_per_month: number | null; // null = unlimited
-  max_duration_minutes: number;
-  verticals: VerticalType[] | 'all';
+  audio_hours: number;
+  meetings_limit: number;
   features: string[];
   highlight?: boolean;
 }
