@@ -5,6 +5,7 @@ import * as Haptics from 'expo-haptics';
 import { Mic, Square, Settings } from 'lucide-react-native';
 import { COLORS, TOUCH_TARGET } from '../constants/theme';
 import { RECORDING_CONFIG } from '../constants/config';
+import RecordingScreen from './RecordingScreen';
 
 interface RecorderProps {
   onRecordingComplete: (uri: string, duration: number) => void;
@@ -221,60 +222,33 @@ export default function AudioRecorder({ onRecordingComplete }: RecorderProps) {
 
   return (
     <View className="items-center">
-      {isRecording && (
-        <View className="mb-6">
-          <Text className="text-navy text-5xl font-mono font-bold text-center">
-            {formatDuration(duration)}
+      {/* Start recording button (only when not recording) */}
+      {!isRecording && (
+        <>
+          <Pressable
+            onPress={startRecording}
+            className="items-center justify-center rounded-full active:scale-95"
+            style={{
+              width: TOUCH_TARGET.large,
+              height: TOUCH_TARGET.large,
+              backgroundColor: COLORS.navy,
+            }}
+          >
+            <Mic size={32} color="white" />
+          </Pressable>
+
+          <Text className="text-gray-600 text-sm font-body mt-4">
+            Apasă pentru înregistrare
           </Text>
-          <Text className="text-gray-600 text-sm font-body text-center mt-2">
-            Înregistrare în curs...
-          </Text>
-        </View>
+        </>
       )}
 
-      {/* Waveform Visualization */}
-      {isRecording && (
-        <View
-          className="flex-row items-center justify-center mb-6"
-          style={{
-            height: BAR_MAX_HEIGHT + 10,
-            width: WAVEFORM_BARS * (BAR_WIDTH + BAR_GAP),
-          }}
-        >
-          {barHeights.map((barHeight, index) => (
-            <Animated.View
-              key={index}
-              style={{
-                width: BAR_WIDTH,
-                height: barHeight,
-                backgroundColor: COLORS.navy,
-                borderRadius: BAR_WIDTH / 2,
-                marginHorizontal: BAR_GAP / 2,
-              }}
-            />
-          ))}
-        </View>
-      )}
-
-      <Pressable
-        onPress={isRecording ? stopRecording : startRecording}
-        className="items-center justify-center rounded-full active:scale-95"
-        style={{
-          width: TOUCH_TARGET.large,
-          height: TOUCH_TARGET.large,
-          backgroundColor: isRecording ? COLORS.error : COLORS.navy,
-        }}
-      >
-        {isRecording ? (
-          <Square size={32} color="white" fill="white" />
-        ) : (
-          <Mic size={32} color="white" />
-        )}
-      </Pressable>
-
-      <Text className="text-gray-600 text-sm font-body mt-4">
-        {isRecording ? 'Apasă pentru oprire' : 'Apasă pentru înregistrare'}
-      </Text>
+      {/* Fullscreen recording overlay with glass orb */}
+      <RecordingScreen
+        isVisible={isRecording}
+        duration={formatDuration(duration)}
+        onStop={stopRecording}
+      />
     </View>
   );
 }
