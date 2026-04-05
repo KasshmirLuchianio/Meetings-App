@@ -1,11 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  Easing,
-} from 'react-native-reanimated';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Animated, Easing } from 'react-native';
 import RecordingOrb from './RecordingOrb';
 
 const { width, height } = Dimensions.get('window');
@@ -17,27 +11,28 @@ interface Props {
 }
 
 export default function RecordingScreen({ isVisible, duration, onStop }: Props) {
-  const bgOpacity = useSharedValue(0);
+  const bgOpacity = useRef(new Animated.Value(0)).current;
 
-  React.useEffect(() => {
-    bgOpacity.value = withTiming(isVisible ? 1 : 0, {
+  useEffect(() => {
+    Animated.timing(bgOpacity, {
+      toValue: isVisible ? 1 : 0,
       duration: 600,
       easing: Easing.out(Easing.cubic),
-    });
+      useNativeDriver: true,
+    }).start();
   }, [isVisible]);
 
-  const bgStyle = useAnimatedStyle(() => ({
-    opacity: bgOpacity.value,
-    pointerEvents: isVisible ? ('auto' as const) : ('none' as const),
-  }));
+  if (!isVisible && (bgOpacity as any)._value === 0) {
+    return null;
+  }
 
   return (
-    <Animated.View style={[styles.container, bgStyle]}>
+    <Animated.View style={[styles.container, { opacity: bgOpacity }]} pointerEvents={isVisible ? 'auto' : 'none'}>
       <View style={styles.content}>
         <RecordingOrb isRecording={isVisible} />
         <Text style={styles.timer}>{duration}</Text>
         <Text style={styles.hint}>Vorbește clar și natural</Text>
-        <TouchableOpacity style={styles.stopButton} onPress={onStop}>
+        <TouchableOpacity style={styles.stopButton} onPress={onStop} activeOpacity={0.7}>
           <View style={styles.stopIcon} />
         </TouchableOpacity>
         <Text style={styles.stopLabel}>Oprește înregistrarea</Text>

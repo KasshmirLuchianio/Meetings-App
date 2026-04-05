@@ -1,58 +1,97 @@
-import React, { useEffect } from 'react';
-import { View, Dimensions, StyleSheet } from 'react-native';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withTiming,
-  withSequence,
-  Easing,
-} from 'react-native-reanimated';
+import React, { useEffect, useRef } from 'react';
+import { Animated, Easing, Dimensions, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const { width } = Dimensions.get('window');
 const ORB_SIZE = width * 0.75;
 
 export default function RecordingOrb({ isRecording }: { isRecording: boolean }) {
-  const scale = useSharedValue(1);
-  const rotation = useSharedValue(0);
-  const opacity = useSharedValue(0);
+  const scale = useRef(new Animated.Value(1)).current;
+  const rotation = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  const pulseRef = useRef<Animated.CompositeAnimation | null>(null);
+  const rotateRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
     if (isRecording) {
       // Fade in
-      opacity.value = withTiming(1, { duration: 600, easing: Easing.out(Easing.cubic) });
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 600,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+
       // Pulsare organică
-      scale.value = withRepeat(
-        withSequence(
-          withTiming(1.08, { duration: 1200, easing: Easing.inOut(Easing.sine) }),
-          withTiming(0.96, { duration: 1400, easing: Easing.inOut(Easing.sine) }),
-        ),
-        -1,
-        true
+      pulseRef.current = Animated.loop(
+        Animated.sequence([
+          Animated.timing(scale, {
+            toValue: 1.08,
+            duration: 1200,
+            easing: Easing.inOut(Easing.sin),
+            useNativeDriver: true,
+          }),
+          Animated.timing(scale, {
+            toValue: 0.96,
+            duration: 1400,
+            easing: Easing.inOut(Easing.sin),
+            useNativeDriver: true,
+          }),
+        ])
       );
+      pulseRef.current.start();
+
       // Rotație lentă
-      rotation.value = withRepeat(
-        withTiming(360, { duration: 8000, easing: Easing.linear }),
-        -1,
-        false
+      rotation.setValue(0);
+      rotateRef.current = Animated.loop(
+        Animated.timing(rotation, {
+          toValue: 1,
+          duration: 8000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
       );
+      rotateRef.current.start();
     } else {
-      opacity.value = withTiming(0, { duration: 400 });
-      scale.value = withTiming(1, { duration: 400 });
+      // Stop animations
+      pulseRef.current?.stop();
+      rotateRef.current?.stop();
+
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 400,
+        useNativeDriver: true,
+      }).start();
+
+      Animated.timing(scale, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }).start();
     }
+
+    return () => {
+      pulseRef.current?.stop();
+      rotateRef.current?.stop();
+    };
   }, [isRecording]);
 
-  const orbStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-    transform: [
-      { scale: scale.value },
-      { rotate: `${rotation.value}deg` },
-    ],
-  }));
+  const rotateInterpolation = rotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
 
   return (
-    <Animated.View style={[styles.orbContainer, orbStyle]}>
+    <Animated.View
+      style={[
+        styles.orbContainer,
+        {
+          opacity,
+          transform: [{ scale }, { rotate: rotateInterpolation }],
+        },
+      ]}
+    >
       <LinearGradient
         colors={['#7B2FFF', '#00CFFF', '#FF6B9D', '#7B2FFF']}
         start={{ x: 0, y: 0 }}
