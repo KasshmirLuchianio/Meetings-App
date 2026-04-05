@@ -379,48 +379,49 @@ async def auth_me(request: Request):
 @app.get("/api/auth/verify")
 async def verify_email(token: str = Query(...)):
     """Verify user email via token link."""
-    from fastapi.responses import RedirectResponse
+    try:
+        user = await users_col.find_one({
+            "verify_token": token,
+        })
+        if not user:
+            return HTMLResponse("""
+                <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#FAF8F3">
+                <h2 style="color:#1B2A4A">Link expirat sau invalid</h2>
+                <p>Solicită un nou email de confirmare din aplicație.</p>
+                </body></html>
+            """, status_code=400)
 
-    user = await users_col.find_one({"verify_token": token})
-    if not user:
-        return HTMLResponse(
-            content="<h2 style='font-family:Arial;color:#c00;text-align:center;margin-top:60px;'>Link invalid sau expirat.</h2>",
-            status_code=400,
+        # Check expiration (handle both aware and naive datetimes from MongoDB)
+        expires = user.get("verify_token_expires")
+        if expires and isinstance(expires, datetime):
+            now = datetime.now(timezone.utc)
+            # Make expires timezone-aware if it's naive (MongoDB can return naive datetimes)
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            if now > expires:
+                return HTMLResponse("""
+                    <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#FAF8F3">
+                    <h2 style="color:#1B2A4A">Link expirat</h2>
+                    <p>Solicită un nou email de confirmare din aplicație.</p>
+                    </body></html>
+                """, status_code=400)
+
+        await users_col.update_one(
+            {"_id": user["_id"]},
+            {"$set": {"is_verified": True}, "$unset": {"verify_token": "", "verify_token_expires": ""}}
         )
-
-    # Check expiration
-    expires = user.get("verify_token_expires")
-    if expires and isinstance(expires, datetime) and datetime.now(timezone.utc) > expires:
-        return HTMLResponse(
-            content="<h2 style='font-family:Arial;color:#c00;text-align:center;margin-top:60px;'>Link-ul a expirat. Solicită un email nou din aplicație.</h2>",
-            status_code=400,
-        )
-
-    # Mark as verified
-    await users_col.update_one(
-        {"_id": user["_id"]},
-        {"$set": {"is_verified": True}, "$unset": {"verify_token": "", "verify_token_expires": ""}}
-    )
-
-    return RedirectResponse(url="/verification-success", status_code=302)
-
-
-@app.get("/verification-success")
-async def verification_success_page():
-    """Show verification success page."""
-    html = """
-    <!DOCTYPE html>
-    <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Cont verificat — Meetings.ro</title></head>
-    <body style="font-family:'DM Sans',Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#FAF8F3;">
-        <div style="text-align:center;max-width:420px;padding:40px 20px;">
-            <div style="font-size:48px;margin-bottom:16px;">✅</div>
-            <h1 style="color:#1B2A4A;font-size:24px;margin-bottom:12px;">Cont verificat!</h1>
-            <p style="color:#555;font-size:16px;line-height:1.5;">Adresa ta de email a fost confirmată.<br>Deschide aplicația Meetings.ro și conectează-te.</p>
-        </div>
-    </body></html>
-    """
-    return HTMLResponse(content=html)
+        return HTMLResponse("""
+            <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#FAF8F3">
+            <h1 style="color:#1B2A4A">✓ Cont confirmat!</h1>
+            <p style="color:#444;font-size:18px">Contul tău Meetings.ro este activ.</p>
+            <p style="color:#888">Deschide aplicația și conectează-te.</p>
+            </body></html>
+        """)
+    except Exception as e:
+        print(f"[VERIFY ERROR] {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, str(e))
 
 
 class ResendVerificationRequest(BaseModel):
