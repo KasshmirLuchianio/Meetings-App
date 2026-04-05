@@ -3,14 +3,15 @@ import json
 import uuid
 import re
 import asyncio
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from io import BytesIO
 from typing import Optional, List
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -19,6 +20,7 @@ import aiofiles
 import stripe
 import jwt
 import bcrypt
+import resend
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 
@@ -39,6 +41,9 @@ STRIPE_PRICES = {
     "enterprise_monthly": "price_1TIOnuHa4KY3ww8wYMLsIRIw",
     "enterprise_yearly": "price_1TIOoCHa4KY3ww8wjDYteZ14",
 }
+
+# ==================== RESEND (Email) ====================
+resend.api_key = os.environ.get("RESEND_API_KEY")
 
 # CORS Origins - includes Expo development
 CORS_ALLOWED_ORIGINS = [
@@ -160,6 +165,35 @@ async def increment_usage(user_id) -> None:
     )
 
 
+# ==================== EMAIL HELPERS ====================
+def build_verification_email(verify_token: str) -> str:
+    """Build HTML for verification email."""
+    return f"""
+    <div style="font-family: 'DM Sans', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px;">
+        <h1 style="color: #1B2A4A; font-size: 24px;">Bun venit la Meetings.ro</h1>
+        <p style="color: #444; font-size: 16px;">Confirmă adresa de email pentru a activa contul tău.</p>
+        <a href="https://meetings-ro-api.onrender.com/api/auth/verify?token={verify_token}"
+           style="display:inline-block; background:#1B2A4A; color:#FAF8F3; padding:14px 28px;
+                  border-radius:8px; text-decoration:none; font-size:16px; margin: 20px 0;">
+            Confirmă contul
+        </a>
+        <p style="color:#888; font-size:13px;">Link-ul expiră în 24 de ore.</p>
+        <hr style="border:none; border-top:1px solid #eee; margin: 30px 0;">
+        <p style="color:#888; font-size:12px;">Meetings.ro — Transcriere și sinteză AI pentru orice domeniu</p>
+    </div>
+    """
+
+
+def send_verification_email(email: str, verify_token: str):
+    """Send verification email via Resend."""
+    resend.Emails.send({
+        "from": "Meetings.ro <noreply@resend.dev>",
+        "to": email,
+        "subject": "Confirmă contul tău Meetings.ro",
+        "html": build_verification_email(verify_token),
+    })
+
+
 # ==================== HELPERS ====================
 def serialize_doc(doc):
     """Convert MongoDB document to JSON-serializable dict."""
@@ -227,7 +261,7 @@ class LoginRequest(BaseModel):
 
 @app.post("/api/auth/register")
 async def auth_register(req: RegisterRequest):
-    """Register a new user."""
+    """Register a new user with email verification."""
     # Check if email already exists
     existing = await users_col.find_one({"email": req.email})
     if existing:
@@ -236,30 +270,36 @@ async def auth_register(req: RegisterRequest):
     if len(req.password) < 6:
         raise HTTPException(status_code=400, detail="Parola trebuie să aibă minim 6 caractere")
 
+    # Generate verification token
+    verify_token = secrets.token_urlsafe(32)
+
     user_doc = {
         "name": req.name,
         "email": req.email,
         "password_hash": hash_password(req.password),
         "company": req.company,
         "plan": "FREE",
+        "is_verified": False,
+        "verify_token": verify_token,
+        "verify_token_expires": datetime.now(timezone.utc) + timedelta(hours=24),
         "meetings_used_this_month": 0,
+        "last_monthly_reset": datetime.now(timezone.utc),
+        "verification_emails_sent": [datetime.now(timezone.utc)],
         "created_at": datetime.now(timezone.utc),
     }
     result = await users_col.insert_one(user_doc)
     user_id = str(result.inserted_id)
-    token = create_token(user_id, req.email)
+
+    # Send verification email
+    try:
+        send_verification_email(req.email, verify_token)
+    except Exception as e:
+        print(f"[Resend] Failed to send verification email to {req.email}: {e}")
 
     return {
-        "token": token,
-        "user": {
-            "_id": user_id,
-            "name": req.name,
-            "email": req.email,
-            "company": req.company,
-            "plan": "FREE",
-            "meetings_used_this_month": 0,
-            "created_at": user_doc["created_at"].isoformat(),
-        }
+        "message": "Cont creat! Verifică inbox-ul pentru a confirma adresa de email.",
+        "requires_verification": True,
+        "user_id": user_id,
     }
 
 
@@ -272,6 +312,16 @@ async def auth_login(req: LoginRequest):
 
     if not verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Email sau parolă incorectă")
+
+    # Block unverified accounts
+    if not user.get("is_verified", False):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": "email_not_verified",
+                "message": "Confirmă adresa de email înainte de a te autentifica. Verifică inbox-ul.",
+            }
+        )
 
     user_id = str(user["_id"])
     token = create_token(user_id, req.email)
@@ -305,6 +355,108 @@ async def auth_me(request: Request):
             "created_at": user["created_at"].isoformat() if isinstance(user.get("created_at"), datetime) else str(user.get("created_at", "")),
         }
     }
+
+
+# ==================== EMAIL VERIFICATION ENDPOINTS ====================
+
+@app.get("/api/auth/verify")
+async def verify_email(token: str = Query(...)):
+    """Verify user email via token link."""
+    from fastapi.responses import RedirectResponse
+
+    user = await users_col.find_one({"verify_token": token})
+    if not user:
+        return HTMLResponse(
+            content="<h2 style='font-family:Arial;color:#c00;text-align:center;margin-top:60px;'>Link invalid sau expirat.</h2>",
+            status_code=400,
+        )
+
+    # Check expiration
+    expires = user.get("verify_token_expires")
+    if expires and isinstance(expires, datetime) and datetime.now(timezone.utc) > expires:
+        return HTMLResponse(
+            content="<h2 style='font-family:Arial;color:#c00;text-align:center;margin-top:60px;'>Link-ul a expirat. Solicită un email nou din aplicație.</h2>",
+            status_code=400,
+        )
+
+    # Mark as verified
+    await users_col.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"is_verified": True}, "$unset": {"verify_token": "", "verify_token_expires": ""}}
+    )
+
+    return RedirectResponse(url="/verification-success", status_code=302)
+
+
+@app.get("/verification-success")
+async def verification_success_page():
+    """Show verification success page."""
+    html = """
+    <!DOCTYPE html>
+    <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Cont verificat — Meetings.ro</title></head>
+    <body style="font-family:'DM Sans',Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#FAF8F3;">
+        <div style="text-align:center;max-width:420px;padding:40px 20px;">
+            <div style="font-size:48px;margin-bottom:16px;">✅</div>
+            <h1 style="color:#1B2A4A;font-size:24px;margin-bottom:12px;">Cont verificat!</h1>
+            <p style="color:#555;font-size:16px;line-height:1.5;">Adresa ta de email a fost confirmată.<br>Deschide aplicația Meetings.ro și conectează-te.</p>
+        </div>
+    </body></html>
+    """
+    return HTMLResponse(content=html)
+
+
+class ResendVerificationRequest(BaseModel):
+    email: str
+
+
+@app.post("/api/auth/resend-verification")
+async def resend_verification(req: ResendVerificationRequest):
+    """Resend verification email. Rate limited: max 3/hour per email."""
+    user = await users_col.find_one({"email": req.email})
+    if not user:
+        # Don't reveal if email exists
+        return {"message": "Dacă adresa există, vei primi un email de confirmare."}
+
+    if user.get("is_verified", False):
+        return {"message": "Contul este deja verificat. Te poți autentifica."}
+
+    # Rate limit: max 3 emails per hour
+    now = datetime.now(timezone.utc)
+    one_hour_ago = now - timedelta(hours=1)
+    sent_times = user.get("verification_emails_sent", [])
+    recent_sends = [t for t in sent_times if isinstance(t, datetime) and t > one_hour_ago]
+
+    if len(recent_sends) >= 3:
+        raise HTTPException(
+            status_code=429,
+            detail="Prea multe încercări. Așteaptă o oră înainte de a solicita un alt email."
+        )
+
+    # Generate new token
+    verify_token = secrets.token_urlsafe(32)
+
+    await users_col.update_one(
+        {"_id": user["_id"]},
+        {
+            "$set": {
+                "verify_token": verify_token,
+                "verify_token_expires": now + timedelta(hours=24),
+            },
+            "$push": {
+                "verification_emails_sent": now,
+            }
+        }
+    )
+
+    # Send email
+    try:
+        send_verification_email(req.email, verify_token)
+    except Exception as e:
+        print(f"[Resend] Failed to resend verification to {req.email}: {e}")
+        raise HTTPException(status_code=500, detail="Eroare la trimiterea emailului. Încearcă din nou.")
+
+    return {"message": "Email de confirmare retrimis. Verifică inbox-ul."}
 
 
 # ==================== USAGE ENDPOINT ====================

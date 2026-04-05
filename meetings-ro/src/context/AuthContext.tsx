@@ -79,6 +79,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       body: JSON.stringify({ email, password }),
     });
 
+    if (res.status === 403) {
+      const err = await res.json().catch(() => ({}));
+      if (err.error === 'email_not_verified') {
+        throw new Error('email_not_verified');
+      }
+      throw new Error(err.message || 'Acces interzis');
+    }
+
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Eroare de conectare' }));
       throw new Error(err.detail || 'Email sau parolă incorectă');
@@ -104,10 +112,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const data = await res.json();
-    setUser(data.user);
-    setAuthToken(data.token);
-    await AsyncStorage.setItem(TOKEN_KEY, data.token);
-    await AsyncStorage.setItem(USER_KEY, JSON.stringify(data.user));
+
+    // New flow: register returns requires_verification, no auto-login
+    if (data.requires_verification) {
+      throw new Error('verification_required');
+    }
+
+    // Fallback for legacy response with token
+    if (data.token && data.user) {
+      setUser(data.user);
+      setAuthToken(data.token);
+      await AsyncStorage.setItem(TOKEN_KEY, data.token);
+      await AsyncStorage.setItem(USER_KEY, JSON.stringify(data.user));
+    }
   };
 
   const logout = async () => {

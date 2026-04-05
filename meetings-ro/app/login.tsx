@@ -1,21 +1,28 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { ArrowLeft, Mail, Lock, Eye, EyeOff } from 'lucide-react-native';
+import { ArrowLeft, Mail, Lock, Eye, EyeOff, RefreshCw } from 'lucide-react-native';
 import { COLORS } from '../src/constants/theme';
+import { API_BASE_URL } from '../src/constants/config';
 import { useAuth } from '../src/context/AuthContext';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ verificationSent?: string }>();
   const insets = useSafeAreaInsets();
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isResending, setIsResending] = useState(false);
   const [error, setError] = useState('');
+  const [needsVerification, setNeedsVerification] = useState(params.verificationSent === '1');
+  const [resendMessage, setResendMessage] = useState(
+    params.verificationSent === '1' ? 'Cont creat! Verifică inbox-ul pentru emailul de confirmare.' : ''
+  );
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -23,15 +30,49 @@ export default function LoginScreen() {
       return;
     }
     setError('');
+    setNeedsVerification(false);
+    setResendMessage('');
     setIsLoading(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       await login(email.trim(), password);
       router.replace('/');
-    } catch {
-      setError('Email sau parolă incorectă');
+    } catch (err: any) {
+      if (err.message === 'email_not_verified') {
+        setNeedsVerification(true);
+        setError('Confirmă adresa de email înainte de a te autentifica. Verifică inbox-ul.');
+      } else {
+        setError(err.message || 'Email sau parolă incorectă');
+      }
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    if (!email.trim()) {
+      setResendMessage('Introdu adresa de email mai întâi.');
+      return;
+    }
+    setIsResending(true);
+    setResendMessage('');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/resend-verification`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setResendMessage(data.message || 'Email retrimis!');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        setResendMessage(data.detail || 'Eroare la retrimitere.');
+      }
+    } catch {
+      setResendMessage('Eroare de rețea. Încearcă din nou.');
+    } finally {
+      setIsResending(false);
     }
   };
 
@@ -62,6 +103,29 @@ export default function LoginScreen() {
             <Text className="text-red-600 font-body text-sm text-center">{error}</Text>
           </View>
         ) : null}
+
+        {/* Resend verification button */}
+        {needsVerification && (
+          <View className="mb-4">
+            <Pressable
+              onPress={handleResendVerification}
+              disabled={isResending}
+              className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex-row items-center justify-center gap-2"
+            >
+              {isResending ? (
+                <ActivityIndicator size="small" color={COLORS.navy} />
+              ) : (
+                <RefreshCw size={16} color={COLORS.navy} />
+              )}
+              <Text className="text-navy font-body text-sm font-medium">
+                Retrimite email de confirmare
+              </Text>
+            </Pressable>
+            {resendMessage ? (
+              <Text className="text-gray-600 font-body text-xs text-center mt-2">{resendMessage}</Text>
+            ) : null}
+          </View>
+        )}
 
         {/* Email */}
         <View className="mb-4">
