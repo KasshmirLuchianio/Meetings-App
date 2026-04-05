@@ -35,6 +35,8 @@ services:
         sync: false                   # Set manually in Render dashboard
       - key: STRIPE_WEBHOOK_SECRET
         sync: false                   # Set manually in Render dashboard
+      - key: JWT_SECRET
+        sync: false                   # Set manually in Render dashboard
       - key: PORT
         value: "8000"
       - key: TZ

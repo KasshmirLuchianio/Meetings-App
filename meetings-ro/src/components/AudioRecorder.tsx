@@ -108,11 +108,16 @@ export default function AudioRecorder({ onRecordingComplete }: RecorderProps) {
         }
       }
 
-      // Configure audio mode
+      // Configure audio session — must be set BEFORE creating recording
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
       });
+
+      // Small delay to let iOS audio session initialize
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       // Recording options with metering enabled
       const recordingOptions = {

@@ -17,6 +17,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 import aiofiles
 import stripe
+import jwt
+import bcrypt
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 
@@ -63,11 +65,55 @@ app.add_middleware(
     expose_headers=["Content-Range", "Accept-Ranges"],  # HTTP 206 Range support
 )
 
+# ==================== AUTH CONFIG ====================
+JWT_SECRET = os.environ.get("JWT_SECRET", "meetings-ro-secret-change-in-production")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRATION_HOURS = 72  # 3 days
+
 # ==================== DATABASE ====================
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
 meetings_col = db["meetings"]
 localities_col = db["localities"]
+users_col = db["users"]
+
+
+# ==================== AUTH HELPERS ====================
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode(), hashed.encode())
+
+
+def create_token(user_id: str, email: str) -> str:
+    from datetime import timedelta
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS),
+        "iat": datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+async def get_current_user(request: Request) -> dict:
+    """Extract and validate JWT from Authorization header."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Token lipsă")
+    token = auth_header.split(" ")[1]
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user = await users_col.find_one({"_id": ObjectId(payload["sub"])})
+        if not user:
+            raise HTTPException(status_code=401, detail="Utilizator inexistent")
+        return user
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expirat")
+    except (jwt.InvalidTokenError, Exception):
+        raise HTTPException(status_code=401, detail="Token invalid")
 
 
 # ==================== HELPERS ====================
@@ -116,8 +162,105 @@ async def seed_default_localities():
 @app.on_event("startup")
 async def startup():
     await ensure_indexes()
+    await users_col.create_index("email", unique=True)
     await seed_default_localities()
     print("[GAL] Server started. Indexes ensured.")
+
+
+# ==================== AUTH ENDPOINTS ====================
+
+class RegisterRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    company: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/api/auth/register")
+async def auth_register(req: RegisterRequest):
+    """Register a new user."""
+    # Check if email already exists
+    existing = await users_col.find_one({"email": req.email})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email deja înregistrat")
+
+    if len(req.password) < 6:
+        raise HTTPException(status_code=400, detail="Parola trebuie să aibă minim 6 caractere")
+
+    user_doc = {
+        "name": req.name,
+        "email": req.email,
+        "password_hash": hash_password(req.password),
+        "company": req.company,
+        "plan": "FREE",
+        "meetings_used_this_month": 0,
+        "created_at": datetime.now(timezone.utc),
+    }
+    result = await users_col.insert_one(user_doc)
+    user_id = str(result.inserted_id)
+    token = create_token(user_id, req.email)
+
+    return {
+        "token": token,
+        "user": {
+            "_id": user_id,
+            "name": req.name,
+            "email": req.email,
+            "company": req.company,
+            "plan": "FREE",
+            "meetings_used_this_month": 0,
+            "created_at": user_doc["created_at"].isoformat(),
+        }
+    }
+
+
+@app.post("/api/auth/login")
+async def auth_login(req: LoginRequest):
+    """Login with email and password."""
+    user = await users_col.find_one({"email": req.email})
+    if not user:
+        raise HTTPException(status_code=401, detail="Email sau parolă incorectă")
+
+    if not verify_password(req.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Email sau parolă incorectă")
+
+    user_id = str(user["_id"])
+    token = create_token(user_id, req.email)
+
+    return {
+        "token": token,
+        "user": {
+            "_id": user_id,
+            "name": user.get("name", ""),
+            "email": user["email"],
+            "company": user.get("company"),
+            "plan": user.get("plan", "FREE"),
+            "meetings_used_this_month": user.get("meetings_used_this_month", 0),
+            "created_at": user["created_at"].isoformat() if isinstance(user.get("created_at"), datetime) else str(user.get("created_at", "")),
+        }
+    }
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    """Get current authenticated user."""
+    user = await get_current_user(request)
+    return {
+        "user": {
+            "_id": str(user["_id"]),
+            "name": user.get("name", ""),
+            "email": user["email"],
+            "company": user.get("company"),
+            "plan": user.get("plan", "FREE"),
+            "meetings_used_this_month": user.get("meetings_used_this_month", 0),
+            "created_at": user["created_at"].isoformat() if isinstance(user.get("created_at"), datetime) else str(user.get("created_at", "")),
+        }
+    }
 
 
 # ==================== MODELS ====================
