@@ -14,6 +14,7 @@ import { ChevronRight, FolderOpen, Search, Filter, X } from 'lucide-react-native
 import TopBar from '../src/components/TopBar';
 import { API_BASE_URL } from '../src/constants/config';
 import { COLORS } from '../src/constants/theme';
+import { useAuth } from '../src/context/AuthContext';
 
 interface Meeting {
   _id: string;
@@ -49,7 +50,9 @@ const STATUS_LABELS: Record<string, string> = {
   transcribing: 'Transcriere',
   processing: 'Procesare',
   processed: 'Finalizat',
+  done: 'Finalizat',
   failed: 'Eșuat',
+  error: 'Eșuat',
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -58,11 +61,14 @@ const STATUS_COLORS: Record<string, string> = {
   transcribing: '#8B5CF6',
   processing: '#10B981',
   processed: '#059669',
+  done: '#059669',
   failed: '#EF4444',
+  error: '#EF4444',
 };
 
 export default function BrowseScreen() {
   const router = useRouter();
+  const { token } = useAuth();
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [allMeetings, setAllMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,7 +103,9 @@ export default function BrowseScreen() {
         setLoadingMore(true);
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/meetings?page=${page}&limit=50`);
+      const response = await fetch(`${API_BASE_URL}/api/meetings?page=${page}&limit=50`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (!response.ok) throw new Error('Failed to fetch meetings');
       
       const data = await response.json();

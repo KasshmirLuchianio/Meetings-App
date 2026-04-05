@@ -93,7 +93,10 @@ export default function HomeScreen() {
         setShowLimitModal(true);
         return;
       }
-      if (!createRes.ok) throw new Error('Failed to create meeting');
+      if (!createRes.ok) {
+        const errBody = await createRes.json().catch(() => ({ detail: `Eroare server (${createRes.status})` }));
+        throw new Error(errBody.detail || `Eroare la creare meeting (${createRes.status})`);
+      }
       const meeting = await createRes.json();
 
       const formData = new FormData();
@@ -108,11 +111,14 @@ export default function HomeScreen() {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
-      if (!uploadRes.ok) throw new Error('Failed to upload');
+      if (!uploadRes.ok) {
+        const errBody = await uploadRes.json().catch(() => ({ detail: `Upload eșuat (${uploadRes.status})` }));
+        throw new Error(errBody.detail || `Upload eșuat (${uploadRes.status})`);
+      }
       await refreshUsage();
       router.push(`/meeting/${meeting._id}`);
-    } catch {
-      alert('Eroare la încărcarea înregistrării');
+    } catch (err: any) {
+      alert(err.message || 'Eroare la încărcarea înregistrării');
     }
   };
 
