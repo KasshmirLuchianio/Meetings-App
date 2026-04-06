@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Animated, Easing, Image, StyleSheet } from 'react-native';
+import { Animated, Easing, Image, StyleSheet } from 'react-native';
 
 export default function SlideShield() {
   const glow = useRef(new Animated.Value(0.75)).current;
@@ -42,38 +42,12 @@ export default function SlideShield() {
   }, []);
 
   return (
-    <Animated.View style={{
-      transform: [{ translateY: floatAnim }],
-      alignItems: 'center',
-      justifyContent: 'center',
-    }}>
-      {/* Blue glow behind shield */}
-      <Animated.View style={[styles.glowBg, { opacity: glow }]} />
-
+    <Animated.View style={{ transform: [{ translateY: floatAnim }], opacity: glow }}>
       <Image
         source={require('../../../assets/onboarding/shield.png')}
-        style={styles.shield}
+        style={{ width: 240, height: 240 }}
         resizeMode="contain"
       />
     </Animated.View>
   );
 }
-
-const styles = StyleSheet.create({
-  shield: {
-    width: 220,
-    height: 220,
-  },
-  glowBg: {
-    position: 'absolute',
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    backgroundColor: 'rgba(100, 160, 255, 0.15)',
-    shadowColor: '#4A90FF',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 40,
-    elevation: 20,
-  },
-});

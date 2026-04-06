@@ -1,6 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { View, Image, Animated, Easing, StyleSheet, Dimensions } from 'react-native';
-import OrbMiniature from './OrbMiniature';
+import { View, Text, Image, Animated, Easing, StyleSheet, Dimensions } from 'react-native';
 
 const { width } = Dimensions.get('window');
 const PHONE_WIDTH = width * 0.52;
@@ -51,9 +50,19 @@ export default function SlidePhone() {
         resizeMode="contain"
       />
 
-      {/* Orb pe ecranul telefonului — centrat pe ecran */}
-      <View style={styles.orbOnScreen}>
-        <OrbMiniature size={90} />
+      {/* App preview pe ecranul telefonului */}
+      <View style={styles.appPreview}>
+        {/* Header */}
+        <View style={styles.previewHeader}>
+          <Text style={styles.previewLogo}>Meetings.ro</Text>
+        </View>
+        {/* Greeting */}
+        <Text style={styles.previewGreeting}>Salut, Vlad</Text>
+        <Text style={styles.previewSub}>Ce ședință înregistrezi azi?</Text>
+        {/* Record button */}
+        <View style={styles.previewButton}>
+          <Text style={styles.previewButtonText}>⏺ Înregistrează</Text>
+        </View>
       </View>
     </Animated.View>
   );
@@ -71,12 +80,50 @@ const styles = StyleSheet.create({
     height: PHONE_HEIGHT,
     position: 'absolute',
   },
-  orbOnScreen: {
+  appPreview: {
     position: 'absolute',
-    top: '30%',
-    alignSelf: 'center',
+    top: '12%',
+    left: '8%',
+    right: '8%',
+    bottom: '8%',
+    backgroundColor: '#FAF8F3',
+    borderRadius: 12,
+    padding: 8,
+    overflow: 'hidden',
+  },
+  previewHeader: {
+    backgroundColor: '#FAF8F3',
+    paddingBottom: 4,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#E0DDD6',
+  },
+  previewLogo: {
+    fontSize: 7,
+    fontWeight: '600',
+    color: '#1B2A4A',
+  },
+  previewGreeting: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#1B2A4A',
+    marginTop: 6,
+  },
+  previewSub: {
+    fontSize: 6,
+    color: '#888',
+    marginTop: 2,
+  },
+  previewButton: {
+    backgroundColor: '#1B2A4A',
+    borderRadius: 6,
+    padding: 5,
+    marginTop: 8,
     alignItems: 'center',
-    justifyContent: 'center',
+  },
+  previewButtonText: {
+    fontSize: 6,
+    color: '#FAF8F3',
+    fontWeight: '600',
   },
   shadow: {
     position: 'absolute',
