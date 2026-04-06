@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { User, PricingTier } from '../types';
 import { API_BASE_URL } from '../constants/config';
 
@@ -41,7 +42,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loadSession = async () => {
     try {
-      const token = await AsyncStorage.getItem(TOKEN_KEY);
+      const token = await SecureStore.getItemAsync(TOKEN_KEY);
       const savedUser = await AsyncStorage.getItem(USER_KEY);
 
       if (token && savedUser) {
@@ -58,7 +59,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           } else {
             // Token expired or invalid — clear session
             setAuthToken(null);
-            await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
+            await SecureStore.deleteItemAsync(TOKEN_KEY);
+            await AsyncStorage.removeItem(USER_KEY);
           }
         } catch {
           // Network error — use cached user data
@@ -95,7 +97,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const data = await res.json();
     setUser(data.user);
     setAuthToken(data.token);
-    await AsyncStorage.setItem(TOKEN_KEY, data.token);
+    await SecureStore.setItemAsync(TOKEN_KEY, data.token);
     await AsyncStorage.setItem(USER_KEY, JSON.stringify(data.user));
   };
 
@@ -116,7 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (data.token && data.user) {
       setUser(data.user);
       setAuthToken(data.token);
-      await AsyncStorage.setItem(TOKEN_KEY, data.token);
+      await SecureStore.setItemAsync(TOKEN_KEY, data.token);
       await AsyncStorage.setItem(USER_KEY, JSON.stringify(data.user));
     }
   };
@@ -124,7 +126,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = async () => {
     setUser(null);
     setAuthToken(null);
-    await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
+    await SecureStore.deleteItemAsync(TOKEN_KEY);
+    await AsyncStorage.removeItem(USER_KEY);
   };
 
   const updatePlan = (plan: PricingTier) => {

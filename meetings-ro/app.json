@@ -17,10 +17,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "ro.meetings.app",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Meetings.ro necesită acces la microfon pentru a înregistra întâlnirile.",
-        "UIBackgroundModes": [
-          "audio"
-        ]
+        "NSMicrophoneUsageDescription": "Meetings.ro necesită acces la microfon pentru a înregistra întâlnirile."
       }
     },
     "android": {

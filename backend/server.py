@@ -62,17 +62,25 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 # ==================== APP ====================
 app = FastAPI(title="Meetings.ro API", version="1.0.0")
 
+ALLOWED_ORIGINS = [
+    "https://meetings-ro-api.onrender.com",
+    "http://localhost:8081",
+    "exp://localhost:8081",
+    "exp://192.168.*",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: Restrict in production to CORS_ALLOWED_ORIGINS
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Content-Range", "Accept-Ranges"],  # HTTP 206 Range support
+    expose_headers=["Content-Range", "Accept-Ranges"],
 )
 
 # ==================== AUTH CONFIG ====================
-JWT_SECRET = os.environ.get("JWT_SECRET", "meetings-ro-secret-change-in-production")
+JWT_SECRET = os.environ.get("JWT_SECRET")
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET environment variable is required")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 72  # 3 days
 
@@ -786,21 +794,38 @@ async def create_meeting(request: Request, data: MeetingCreate = None):
     return serialize_doc(meeting)
 
 
+ALLOWED_AUDIO_TYPES = {
+    "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav",
+    "audio/m4a", "audio/x-m4a", "audio/mp4", "audio/ogg",
+    "audio/webm", "audio/aac", "audio/x-m4a", "audio/3gpp",
+}
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+
 @app.post("/api/meetings/{meeting_id}/upload")
 async def upload_audio(meeting_id: str, background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     """Upload audio file for a meeting and start processing."""
+    # Validate MIME type
+    if file.content_type and file.content_type not in ALLOWED_AUDIO_TYPES:
+        raise HTTPException(status_code=415, detail="Format audio neacceptat")
+
     # Validate meeting exists
     meeting = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
     if not meeting:
         raise HTTPException(status_code=404, detail="Ședința nu a fost găsită")
-    
-    # Save audio file
+
+    # Save audio file with size check
     ext = file.filename.split(".")[-1] if "." in file.filename else "webm"
+    allowed_exts = {"mp3", "wav", "m4a", "mp4", "ogg", "webm", "aac", "3gpp"}
+    if ext.lower() not in allowed_exts:
+        ext = "webm"
     audio_filename = f"{meeting_id}.{ext}"
     audio_path = str(UPLOAD_DIR / audio_filename)
-    
+
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="Fișierul depășește limita de 100MB")
+
     async with aiofiles.open(audio_path, "wb") as f:
-        content = await file.read()
         await f.write(content)
     
     file_size = os.path.getsize(audio_path)
