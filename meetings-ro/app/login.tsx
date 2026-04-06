@@ -145,6 +145,14 @@ export default function LoginScreen() {
           </View>
         </View>
 
+        {/* Forgot Password */}
+        <Pressable
+          onPress={() => router.push('/forgot-password')}
+          className="mb-4 items-end"
+        >
+          <Text className="text-navy font-body text-sm font-medium">Ai uitat parola?</Text>
+        </Pressable>
+
         {/* Resend verification — only after 403 email_not_verified */}
         {needsVerification && (
           <View className="mb-4">

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal, RefreshControl } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, Redirect } from 'expo-router';
 import * as Haptics from 'expo-haptics';
@@ -32,6 +32,30 @@ export default function HomeScreen() {
   const [limitMessage, setLimitMessage] = useState('');
   const [usageData, setUsageData] = useState<{ used: number; limit: number; percentage: number } | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadUsageData = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/users/me/usage`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUsageData({
+          used: data.meetings_used,
+          limit: data.meetings_limit,
+          percentage: data.percentage,
+        });
+      }
+    } catch {}
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadUsageData();
+    setRefreshing(false);
+  };
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then((saved) => {
@@ -46,23 +70,7 @@ export default function HomeScreen() {
 
   // Fetch real usage data from backend
   useEffect(() => {
-    if (!token) return;
-    const fetchUsage = async () => {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/users/me/usage`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setUsageData({
-            used: data.meetings_used,
-            limit: data.meetings_limit,
-            percentage: data.percentage,
-          });
-        }
-      } catch {}
-    };
-    fetchUsage();
+    loadUsageData();
   }, [token, user?.meetings_used_this_month]);
 
   if (isLoading) {
@@ -143,7 +151,13 @@ export default function HomeScreen() {
     <View className="flex-1 bg-ivory">
       <TopBar />
 
-      <ScrollView className="flex-1" contentContainerClassName="px-4 py-5">
+      <ScrollView
+        className="flex-1"
+        contentContainerClassName="px-4 py-5"
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#1B2A4A" />
+        }
+      >
         {/* Greeting */}
         <View className="mb-5">
           <Text className="text-navy text-2xl font-heading">

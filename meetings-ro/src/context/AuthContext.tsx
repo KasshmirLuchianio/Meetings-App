@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { User, PricingTier } from '../types';
 import { API_BASE_URL } from '../constants/config';
+import { setLogoutCallback } from '../utils/authenticatedFetch';
 
 interface AuthContextType {
   user: User | null;
@@ -38,6 +39,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     loadSession();
+    setLogoutCallback(() => {
+      setUser(null);
+      setAuthToken(null);
+      SecureStore.deleteItemAsync(TOKEN_KEY);
+      AsyncStorage.removeItem(USER_KEY);
+    });
   }, []);
 
   const loadSession = async () => {

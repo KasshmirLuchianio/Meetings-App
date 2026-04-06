@@ -14,25 +14,46 @@
       "backgroundColor": "#FAF8F3"
     },
     "ios": {
-      "supportsTablet": true,
       "bundleIdentifier": "ro.meetings.app",
+      "buildNumber": "1",
+      "minimumOsVersion": "13.0",
+      "supportsTablet": false,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Meetings.ro necesită acces la microfon pentru a înregistra întâlnirile."
+        "NSMicrophoneUsageDescription": "Meetings.ro necesită acces la microfon pentru înregistrarea ședințelor.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "privacyManifests": {
+        "NSPrivacyAccessedAPITypes": [],
+        "NSPrivacyCollectedDataTypes": [
+          {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeEmailAddress",
+            "NSPrivacyCollectedDataTypeLinked": true,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": ["NSPrivacyCollectedDataTypePurposeAppFunctionality"]
+          },
+          {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeAudioData",
+            "NSPrivacyCollectedDataTypeLinked": true,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": ["NSPrivacyCollectedDataTypePurposeAppFunctionality"]
+          }
+        ]
       }
     },
     "android": {
       "package": "ro.meetings.app",
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#FAF8F3"
-      },
+      "versionCode": 1,
+      "targetSdkVersion": 34,
       "permissions": [
         "RECORD_AUDIO",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE"
+        "INTERNET",
+        "VIBRATE"
       ],
-      "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1B2A4A"
+      },
+      "edgeToEdgeEnabled": true
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -40,7 +61,12 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "expo-font"
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Meetings.ro necesită acces la microfon pentru înregistrarea ședințelor."
+        }
+      ]
     ],
     "extra": {
       "router": {

@@ -88,34 +88,33 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
+    if (!meetingId) return;
     loadMeetingData();
-    
-    // Start polling if status is not final
-    return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-      }
-    };
   }, [meetingId]);
 
   useEffect(() => {
-    // Start/stop polling based on status
+    if (!meetingId) return;
+
+    // Clear any existing interval first
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+
+    // Only poll if status is not final
     if (meeting && !FINAL_STATUSES.includes(meeting.status)) {
-      // Poll every 5 seconds for status updates
       pollingRef.current = setInterval(() => {
         loadMeetingData(true);
       }, 5000);
-    } else if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
     }
 
     return () => {
       if (pollingRef.current) {
         clearInterval(pollingRef.current);
+        pollingRef.current = null;
       }
     };
-  }, [meeting?.status]);
+  }, [meetingId, meeting?.status]);
 
   const safeFetchJson = async (url: string) => {
     const headers: Record<string, string> = {};

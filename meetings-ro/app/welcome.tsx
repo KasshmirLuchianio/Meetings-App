@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, StatusBar } from 'react-native';
+import { View, Text, Pressable, StatusBar, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
@@ -88,6 +88,22 @@ export default function WelcomeScreen() {
         >
           <Text className="text-navy font-body text-base">Am deja un cont</Text>
         </Pressable>
+
+        <Text className="text-gray-400 font-body text-xs text-center mt-4 leading-5">
+          <Text
+            className="text-navy underline"
+            onPress={() => Linking.openURL('https://meetings-ro-api.onrender.com/terms')}
+          >
+            Termeni
+          </Text>
+          {'  ·  '}
+          <Text
+            className="text-navy underline"
+            onPress={() => Linking.openURL('https://meetings-ro-api.onrender.com/privacy')}
+          >
+            Confidențialitate
+          </Text>
+        </Text>
       </View>
     </View>
   );

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { View, Text, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
@@ -205,8 +205,19 @@ export default function RegisterScreen() {
         {/* Terms */}
         <Text className="text-gray-400 font-body text-xs text-center mt-6 leading-5">
           Prin crearea contului, accepți{' '}
-          <Text className="text-navy">Termenii și Condițiile</Text> și{' '}
-          <Text className="text-navy">Politica de Confidențialitate</Text>
+          <Text
+            className="text-navy underline"
+            onPress={() => Linking.openURL('https://meetings-ro-api.onrender.com/terms')}
+          >
+            Termenii și Condițiile
+          </Text>
+          {' '}și{' '}
+          <Text
+            className="text-navy underline"
+            onPress={() => Linking.openURL('https://meetings-ro-api.onrender.com/privacy')}
+          >
+            Politica de Confidențialitate
+          </Text>
         </Text>
       </ScrollView>
 

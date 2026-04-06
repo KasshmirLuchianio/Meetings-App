@@ -9,9 +9,10 @@ from pathlib import Path
 from io import BytesIO
 from typing import Optional, List
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -21,6 +22,9 @@ import stripe
 import jwt
 import bcrypt
 import resend
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 
@@ -60,7 +64,17 @@ UPLOAD_DIR = Path("/app/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # ==================== APP ====================
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Meetings.ro API", version="1.0.0")
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Prea multe cereri. Încearcă din nou mai târziu."}
+    )
 
 ALLOWED_ORIGINS = [
     "https://meetings-ro-api.onrender.com",
@@ -119,12 +133,12 @@ def create_token(user_id: str, email: str) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
-async def get_current_user(request: Request) -> dict:
-    """Extract and validate JWT from Authorization header."""
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Token lipsă")
-    token = auth_header.split(" ")[1]
+security = HTTPBearer()
+
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    """Extract and validate JWT from Authorization header (FastAPI Depends pattern)."""
+    token = credentials.credentials
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         user = await users_col.find_one({"_id": ObjectId(payload["sub"])})
@@ -135,6 +149,19 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Token expirat")
     except (jwt.InvalidTokenError, Exception):
         raise HTTPException(status_code=401, detail="Token invalid")
+
+
+async def verify_meeting_ownership(meeting_id: str, user: dict) -> dict:
+    """Fetch meeting and verify it belongs to the user. Returns meeting doc."""
+    try:
+        meeting = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID meeting invalid")
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Ședința nu a fost găsită")
+    if meeting.get("user_id") and meeting["user_id"] != str(user["_id"]):
+        raise HTTPException(status_code=403, detail="Nu ai acces la această ședință")
+    return meeting
 
 
 # ==================== PLAN LIMIT HELPERS ====================
@@ -250,11 +277,36 @@ async def seed_default_localities():
     print(f"[GAL] Default localities seeded: {DEFAULT_LOCALITIES}")
 
 
+async def create_demo_account():
+    """Create a demo account for Apple Review if it doesn't exist."""
+    demo_email = "demo@meetings.ro"
+    existing = await users_col.find_one({"email": demo_email})
+    if not existing:
+        await users_col.insert_one({
+            "email": demo_email,
+            "password_hash": hash_password("Demo2026!"),
+            "name": "Demo User",
+            "plan": "PRO",
+            "is_verified": True,
+            "meetings_used_this_month": 0,
+            "last_monthly_reset": datetime.now(timezone.utc),
+            "created_at": datetime.now(timezone.utc),
+        })
+        print("[DEMO] Demo account created: demo@meetings.ro / Demo2026!")
+
+
 @app.on_event("startup")
 async def startup():
     await ensure_indexes()
+    # User indexes
     await users_col.create_index("email", unique=True)
+    await users_col.create_index("reset_token", sparse=True)
+    await users_col.create_index("verify_token", sparse=True)
+    # Meeting indexes for user-scoped queries
+    await meetings_col.create_index("user_id")
+    await meetings_col.create_index([("user_id", 1), ("created_at", -1)])
     await seed_default_localities()
+    await create_demo_account()
     print("[GAL] Server started. Indexes ensured.")
 
 
@@ -273,7 +325,8 @@ class LoginRequest(BaseModel):
 
 
 @app.post("/api/auth/register")
-async def auth_register(req: RegisterRequest):
+@limiter.limit("5/minute")
+async def auth_register(request: Request, req: RegisterRequest):
     """Register a new user with email verification."""
     # Check if email already exists
     existing = await users_col.find_one({"email": req.email})
@@ -319,7 +372,8 @@ async def auth_register(req: RegisterRequest):
 
 
 @app.post("/api/auth/login")
-async def auth_login(req: LoginRequest):
+@limiter.limit("10/minute")
+async def auth_login(request: Request, req: LoginRequest):
     """Login with email and password."""
     user = await users_col.find_one({"email": req.email})
     if not user:
@@ -352,12 +406,17 @@ async def auth_login(req: LoginRequest):
     }
 
 
-# ---- ADMIN: Delete user by email (for testing) ----
+# ---- ADMIN: Require admin role ----
+async def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    """Dependency that requires the user to have admin role."""
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Acces permis doar administratorilor")
+    return user
+
+
 @app.delete("/api/admin/delete-user")
-async def admin_delete_user(email: str = Query(...), admin_key: str = Query(...)):
-    """Delete a user by email. Requires admin key."""
-    if admin_key != os.environ.get("JWT_SECRET", ""):
-        raise HTTPException(status_code=403, detail="Unauthorized")
+async def admin_delete_user(email: str = Query(...), admin: dict = Depends(require_admin)):
+    """Delete a user by email. Requires admin role."""
     result = await users_col.delete_one({"email": email})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
@@ -365,19 +424,15 @@ async def admin_delete_user(email: str = Query(...), admin_key: str = Query(...)
 
 
 @app.delete("/api/admin/delete-all-users")
-async def admin_delete_all_users(admin_key: str = Query(...)):
-    """Delete ALL users. Requires admin key (JWT_SECRET)."""
-    expected = os.environ.get("JWT_SECRET", "").strip()
-    if admin_key.strip() != expected:
-        raise HTTPException(status_code=403, detail="Unauthorized")
+async def admin_delete_all_users(admin: dict = Depends(require_admin)):
+    """Delete ALL users. Requires admin role."""
     result = await users_col.delete_many({})
     return {"message": f"All users deleted", "deleted": result.deleted_count}
 
 
 @app.get("/api/auth/me")
-async def auth_me(request: Request):
+async def auth_me(user: dict = Depends(get_current_user)):
     """Get current authenticated user."""
-    user = await get_current_user(request)
     return {
         "user": {
             "_id": str(user["_id"]),
@@ -389,6 +444,115 @@ async def auth_me(request: Request):
             "created_at": user["created_at"].isoformat() if isinstance(user.get("created_at"), datetime) else str(user.get("created_at", "")),
         }
     }
+
+
+# ==================== TOKEN REFRESH ====================
+
+class RefreshRequest(BaseModel):
+    token: str
+
+
+@app.post("/api/auth/refresh")
+async def auth_refresh(req: RefreshRequest):
+    """Refresh an expiring JWT token. Returns new token if current one is still valid."""
+    try:
+        payload = jwt.decode(req.token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user = await users_col.find_one({"_id": ObjectId(payload["sub"])})
+        if not user:
+            raise HTTPException(status_code=401, detail="Utilizator inexistent")
+        new_token = create_token(str(user["_id"]), user["email"])
+        return {"token": new_token}
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expirat — reconectează-te")
+    except (jwt.InvalidTokenError, Exception):
+        raise HTTPException(status_code=401, detail="Token invalid")
+
+
+# ==================== PASSWORD RESET ====================
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@app.post("/api/auth/forgot-password")
+@limiter.limit("3/minute")
+async def forgot_password(request: Request, req: ForgotPasswordRequest):
+    """Send a password reset email. Always returns success to prevent email enumeration."""
+    user = await users_col.find_one({"email": req.email})
+    if not user:
+        return {"message": "Dacă adresa există, vei primi un email de resetare."}
+
+    reset_token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(hours=1)
+
+    await users_col.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"reset_token": reset_token, "reset_token_expires": expires}}
+    )
+
+    # Send reset email via Resend
+    try:
+        reset_html = f"""
+        <div style="font-family: 'DM Sans', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px;">
+            <h1 style="color: #1B2A4A; font-size: 24px;">Resetare parolă</h1>
+            <p style="color: #444; font-size: 16px;">Ai solicitat resetarea parolei pentru contul tău Meetings.ro.</p>
+            <p style="color: #444; font-size: 16px;">Folosește codul de mai jos în aplicație:</p>
+            <div style="background: #F3F4F6; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
+                <span style="font-size: 28px; font-weight: bold; color: #1B2A4A; letter-spacing: 2px;">{reset_token[:8]}</span>
+            </div>
+            <p style="color:#888; font-size:13px;">Codul expiră în 1 oră.</p>
+            <hr style="border:none; border-top:1px solid #eee; margin: 30px 0;">
+            <p style="color:#888; font-size:12px;">Meetings.ro — Transcriere și sinteză AI pentru orice domeniu</p>
+        </div>
+        """
+        params: resend.Emails.SendParams = {
+            "from": "Meetings.ro <onboarding@resend.dev>",
+            "to": [req.email],
+            "subject": "Resetare parolă Meetings.ro",
+            "html": reset_html,
+        }
+        resend.Emails.send(params)
+    except Exception as e:
+        print(f"[PASSWORD RESET] Failed to send reset email: {e}")
+
+    return {"message": "Dacă adresa există, vei primi un email de resetare."}
+
+
+@app.post("/api/auth/reset-password")
+@limiter.limit("5/minute")
+async def reset_password(request: Request, req: ResetPasswordRequest):
+    """Reset password using a valid reset token."""
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Parola trebuie să aibă minim 6 caractere")
+
+    # Find user by reset_token (match first 8 chars or full token)
+    user = await users_col.find_one({"reset_token": {"$regex": f"^{re.escape(req.token)}"}})
+    if not user:
+        raise HTTPException(status_code=400, detail="Cod invalid sau expirat")
+
+    # Check expiry
+    expires = user.get("reset_token_expires")
+    if expires:
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) > expires:
+            raise HTTPException(status_code=400, detail="Cod expirat. Solicită un nou email de resetare.")
+
+    # Update password and clear reset token
+    await users_col.update_one(
+        {"_id": user["_id"]},
+        {
+            "$set": {"password_hash": hash_password(req.new_password)},
+            "$unset": {"reset_token": "", "reset_token_expires": ""}
+        }
+    )
+
+    return {"message": "Parola a fost resetată cu succes. Te poți autentifica."}
 
 
 # ==================== EMAIL VERIFICATION ENDPOINTS ====================
@@ -496,9 +660,8 @@ async def resend_verification(req: ResendVerificationRequest):
 
 # ==================== USAGE ENDPOINT ====================
 @app.get("/api/users/me/usage")
-async def get_user_usage(request: Request):
+async def get_user_usage(user: dict = Depends(get_current_user)):
     """Get current user's plan usage stats."""
-    user = await get_current_user(request)
     user = await reset_monthly_if_needed(user)
     plan = user.get("plan", "FREE")
     limit = PLAN_LIMITS.get(plan.lower(), PLAN_LIMITS["free"])
@@ -746,10 +909,8 @@ async def health():
 # ---- MEETINGS CRUD ----
 
 @app.post("/api/meetings")
-async def create_meeting(request: Request, data: MeetingCreate = None):
+async def create_meeting(data: MeetingCreate = None, user: dict = Depends(get_current_user)):
     """Create a new meeting placeholder (auth + plan limit enforced)."""
-    # Auth + plan limit check
-    user = await get_current_user(request)
     await check_plan_limit(user)
 
     now = datetime.now(timezone.utc)
@@ -802,16 +963,14 @@ ALLOWED_AUDIO_TYPES = {
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 
 @app.post("/api/meetings/{meeting_id}/upload")
-async def upload_audio(meeting_id: str, background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def upload_audio(meeting_id: str, background_tasks: BackgroundTasks, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     """Upload audio file for a meeting and start processing."""
     # Validate MIME type
     if file.content_type and file.content_type not in ALLOWED_AUDIO_TYPES:
         raise HTTPException(status_code=415, detail="Format audio neacceptat")
 
-    # Validate meeting exists
-    meeting = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
-    if not meeting:
-        raise HTTPException(status_code=404, detail="Ședința nu a fost găsită")
+    # Validate meeting exists + ownership
+    meeting = await verify_meeting_ownership(meeting_id, user)
 
     # Save audio file with size check
     ext = file.filename.split(".")[-1] if "." in file.filename else "webm"
@@ -850,12 +1009,10 @@ async def upload_audio(meeting_id: str, background_tasks: BackgroundTasks, file:
 
 
 @app.get("/api/meetings/{meeting_id}/audio")
-async def get_audio(meeting_id: str, request: Request = None):
+async def get_audio(meeting_id: str, request: Request, user: dict = Depends(get_current_user)):
     """Stream audio file with HTTP Range request support for mobile playback."""
-    from starlette.requests import Request as _Req
-    
-    meeting = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
-    if not meeting or not meeting.get("audio_path"):
+    meeting = await verify_meeting_ownership(meeting_id, user)
+    if not meeting.get("audio_path"):
         raise HTTPException(status_code=404, detail="Audio nu a fost găsit")
     
     audio_path = meeting["audio_path"]
@@ -941,11 +1098,12 @@ async def list_meetings(
     status: Optional[str] = None,
     q: Optional[str] = None,
     page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=100)
+    limit: int = Query(50, ge=1, le=100),
+    user: dict = Depends(get_current_user),
 ):
-    """List meetings with optional filters."""
-    query = {}
-    
+    """List meetings with optional filters (scoped to current user)."""
+    query = {"user_id": str(user["_id"])}
+
     if locality:
         query["locality"] = locality
     if status:
@@ -975,17 +1133,19 @@ async def list_meetings(
 @app.get("/api/meetings/calendar-dates")
 async def get_meeting_dates(
     year: int = Query(...),
-    month: int = Query(...)
+    month: int = Query(...),
+    user: dict = Depends(get_current_user),
 ):
     """Get dates that have meetings for a given month (for calendar highlighting)."""
     from calendar import monthrange
-    
+
     start_date = datetime(year, month, 1, tzinfo=timezone.utc)
     _, last_day = monthrange(year, month)
     end_date = datetime(year, month, last_day, 23, 59, 59, tzinfo=timezone.utc)
-    
+
     pipeline = [
         {"$match": {
+            "user_id": str(user["_id"]),
             "created_at": {"$gte": start_date, "$lte": end_date}
         }},
         {"$group": {
@@ -1005,17 +1165,19 @@ async def get_meeting_dates(
 
 @app.get("/api/meetings/calendar-by-date")
 async def get_meetings_by_date(
-    date: str = Query(...)
+    date: str = Query(...),
+    user: dict = Depends(get_current_user),
 ):
     """Get meetings for a specific date (YYYY-MM-DD)."""
     try:
         target_date = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except ValueError:
         raise HTTPException(status_code=400, detail="Format dată invalid. Folosiți YYYY-MM-DD")
-    
+
     next_date = target_date.replace(hour=23, minute=59, second=59)
-    
+
     query = {
+        "user_id": str(user["_id"]),
         "created_at": {"$gte": target_date, "$lte": next_date}
     }
     
@@ -1028,20 +1190,16 @@ async def get_meetings_by_date(
 
 
 @app.get("/api/meetings/{meeting_id}")
-async def get_meeting(meeting_id: str):
+async def get_meeting(meeting_id: str, user: dict = Depends(get_current_user)):
     """Get single meeting detail."""
-    meeting = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
-    if not meeting:
-        raise HTTPException(status_code=404, detail="Ședința nu a fost găsită")
+    meeting = await verify_meeting_ownership(meeting_id, user)
     return serialize_doc(meeting)
 
 
 @app.patch("/api/meetings/{meeting_id}")
-async def update_meeting(meeting_id: str, data: MeetingUpdate):
+async def update_meeting(meeting_id: str, data: MeetingUpdate, user: dict = Depends(get_current_user)):
     """Update meeting title or locality."""
-    meeting = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
-    if not meeting:
-        raise HTTPException(status_code=404, detail="Ședința nu a fost găsită")
+    meeting = await verify_meeting_ownership(meeting_id, user)
     
     update_fields = {"updated_at": datetime.now(timezone.utc)}
     if data.title is not None:
@@ -1066,11 +1224,9 @@ async def update_meeting(meeting_id: str, data: MeetingUpdate):
 
 
 @app.delete("/api/meetings/{meeting_id}")
-async def delete_meeting(meeting_id: str):
+async def delete_meeting(meeting_id: str, user: dict = Depends(get_current_user)):
     """Delete a meeting."""
-    meeting = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
-    if not meeting:
-        raise HTTPException(status_code=404, detail="Ședința nu a fost găsită")
+    meeting = await verify_meeting_ownership(meeting_id, user)
     
     # Delete audio file if exists
     if meeting.get("audio_path") and os.path.exists(meeting["audio_path"]):
@@ -1083,11 +1239,9 @@ async def delete_meeting(meeting_id: str):
 # ---- ACTION ITEMS ----
 
 @app.patch("/api/meetings/{meeting_id}/actions/{action_id}")
-async def toggle_action(meeting_id: str, action_id: str):
+async def toggle_action(meeting_id: str, action_id: str, user: dict = Depends(get_current_user)):
     """Toggle action item completion."""
-    meeting = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
-    if not meeting:
-        raise HTTPException(status_code=404, detail="Ședința nu a fost găsită")
+    meeting = await verify_meeting_ownership(meeting_id, user)
     
     actions = meeting.get("actions", [])
     found = False
@@ -1112,11 +1266,9 @@ async def toggle_action(meeting_id: str, action_id: str):
 # ---- REGENERATE AI ----
 
 @app.post("/api/meetings/{meeting_id}/regenerate")
-async def regenerate_meeting(meeting_id: str, background_tasks: BackgroundTasks):
+async def regenerate_meeting(meeting_id: str, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)):
     """Regenerate AI processing for a meeting."""
-    meeting = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
-    if not meeting:
-        raise HTTPException(status_code=404, detail="Ședința nu a fost găsită")
+    meeting = await verify_meeting_ownership(meeting_id, user)
     
     if not meeting.get("transcript") and not meeting.get("audio_path"):
         raise HTTPException(status_code=400, detail="Nu există transcriere sau audio pentru procesare")
@@ -1140,11 +1292,9 @@ async def regenerate_meeting(meeting_id: str, background_tasks: BackgroundTasks)
 # ---- CORRECT TRANSCRIPT (Claude) ----
 
 @app.post("/api/meetings/{meeting_id}/correct-transcript")
-async def correct_transcript(meeting_id: str, background_tasks: BackgroundTasks):
+async def correct_transcript(meeting_id: str, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)):
     """Use Claude to correct grammar/transcription errors, then re-extract report."""
-    meeting = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
-    if not meeting:
-        raise HTTPException(status_code=404, detail="Ședința nu a fost găsită")
+    meeting = await verify_meeting_ownership(meeting_id, user)
 
     if not meeting.get("transcript"):
         raise HTTPException(status_code=400, detail="Nu există transcriere de corectat")
@@ -1305,7 +1455,7 @@ class LocalityRename(BaseModel):
     new_name: str
 
 @app.get("/api/localities")
-async def list_localities():
+async def list_localities(user: dict = Depends(get_current_user)):
     """List all localities (folders) with meeting counts."""
     # Get all localities from the localities collection
     all_localities = {}
@@ -1334,7 +1484,7 @@ async def list_localities():
 
 
 @app.post("/api/localities")
-async def create_locality(data: LocalityCreate):
+async def create_locality(data: LocalityCreate, user: dict = Depends(get_current_user)):
     """Create a new locality folder."""
     name = data.name.strip()
     if not name:
@@ -1355,7 +1505,7 @@ async def create_locality(data: LocalityCreate):
 
 
 @app.patch("/api/localities/{locality_name}")
-async def rename_locality(locality_name: str, data: LocalityRename):
+async def rename_locality(locality_name: str, data: LocalityRename, user: dict = Depends(get_current_user)):
     """Rename a locality folder and update all meetings."""
     new_name = data.new_name.strip()
     if not new_name:
@@ -1388,7 +1538,7 @@ async def rename_locality(locality_name: str, data: LocalityRename):
 
 
 @app.delete("/api/localities/{locality_name}")
-async def delete_locality(locality_name: str):
+async def delete_locality(locality_name: str, user: dict = Depends(get_current_user)):
     """Delete a locality folder (meetings stay but lose locality)."""
     # Delete from localities collection if exists
     await localities_col.delete_one({"name": locality_name})
@@ -1407,11 +1557,9 @@ async def delete_locality(locality_name: str):
 # ---- EXPORT ----
 
 @app.get("/api/meetings/{meeting_id}/export/pdf")
-async def export_pdf(meeting_id: str):
+async def export_pdf(meeting_id: str, user: dict = Depends(get_current_user)):
     """Export meeting as PDF."""
-    meeting = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
-    if not meeting:
-        raise HTTPException(status_code=404, detail="Ședința nu a fost găsită")
+    meeting = await verify_meeting_ownership(meeting_id, user)
     
     from fpdf import FPDF
     
@@ -1481,11 +1629,9 @@ async def export_pdf(meeting_id: str):
 
 
 @app.get("/api/meetings/{meeting_id}/export/docx")
-async def export_docx(meeting_id: str):
+async def export_docx(meeting_id: str, user: dict = Depends(get_current_user)):
     """Export meeting as DOCX."""
-    meeting = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
-    if not meeting:
-        raise HTTPException(status_code=404, detail="Ședința nu a fost găsită")
+    meeting = await verify_meeting_ownership(meeting_id, user)
     
     from docx import Document
     from docx.shared import Pt, Inches
@@ -1592,15 +1738,10 @@ def transliterate_ro(text: str) -> str:
 # ---- MEETING STATUS POLLING ----
 
 @app.get("/api/meetings/{meeting_id}/status")
-async def get_meeting_status(meeting_id: str):
+async def get_meeting_status(meeting_id: str, user: dict = Depends(get_current_user)):
     """Quick status check for polling."""
-    meeting = await meetings_col.find_one(
-        {"_id": ObjectId(meeting_id)},
-        {"status": 1, "error": 1, "title": 1, "locality": 1}
-    )
-    if not meeting:
-        raise HTTPException(status_code=404, detail="Ședința nu a fost găsită")
-    return serialize_doc(meeting)
+    meeting = await verify_meeting_ownership(meeting_id, user)
+    return serialize_doc({"_id": meeting["_id"], "status": meeting.get("status"), "error": meeting.get("error"), "title": meeting.get("title"), "locality": meeting.get("locality")})
 
 
 # ---- HEALTH CHECK ----
@@ -1620,7 +1761,7 @@ class CheckoutRequest(BaseModel):
 
 
 @app.post("/api/payments/create-checkout-session")
-async def create_checkout_session(req: CheckoutRequest):
+async def create_checkout_session(req: CheckoutRequest, user: dict = Depends(get_current_user)):
     """Create a Stripe Checkout Session for subscription."""
     price_key = f"{req.plan}_{req.interval}"
     price_id = STRIPE_PRICES.get(price_key)
@@ -1717,4 +1858,64 @@ async def payment_cancel():
         "status": "cancelled",
         "message": "Plata a fost anulată. Poți reveni în aplicație.",
     })
+
+
+# ==================== LEGAL PAGES (App Store / Google Play) ====================
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_policy():
+    return HTMLResponse("""
+    <html>
+    <head><title>Politică de Confidențialitate — Meetings.ro</title>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>body{font-family:'Segoe UI',system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.7;color:#333}h1{color:#1B2A4A}h2{color:#1B2A4A;margin-top:28px}</style>
+    </head>
+    <body>
+    <h1>Politică de Confidențialitate</h1>
+    <p>Ultima actualizare: Aprilie 2026</p>
+    <h2>Date colectate</h2>
+    <p>Meetings.ro colectează: adresă email, numele utilizatorului, înregistrări audio ale ședințelor, transcrieri și rapoarte generate automat.</p>
+    <h2>Utilizarea datelor</h2>
+    <p>Datele sunt folosite exclusiv pentru generarea transcrierilor și rapoartelor solicitate de utilizator. Nu vindem și nu partajăm datele cu terți.</p>
+    <h2>Stocarea datelor</h2>
+    <p>Datele sunt stocate pe servere securizate în Europa (Frankfurt, Germania) prin intermediul platformei Render.com și MongoDB Atlas.</p>
+    <h2>Servicii terțe</h2>
+    <p>Folosim: Groq/OpenAI (transcriere audio), Anthropic Claude (extracție date), Stripe (plăți), Resend (email-uri tranzacționale). Fiecare serviciu procesează doar datele minime necesare.</p>
+    <h2>Drepturi GDPR</h2>
+    <p>Ai dreptul la acces, rectificare, portabilitate și ștergere a datelor tale. Pentru orice solicitare, contactează-ne la adresa de mai jos.</p>
+    <h2>Retenția datelor</h2>
+    <p>Înregistrările audio și transcrierile sunt păstrate atât timp cât contul este activ. La ștergerea contului, toate datele sunt eliminate în maxim 30 de zile.</p>
+    <h2>Contact</h2>
+    <p>hello@meetings.ro</p>
+    </body></html>
+    """)
+
+
+@app.get("/terms", response_class=HTMLResponse)
+async def terms_of_service():
+    return HTMLResponse("""
+    <html>
+    <head><title>Termeni și Condiții — Meetings.ro</title>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>body{font-family:'Segoe UI',system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.7;color:#333}h1{color:#1B2A4A}h2{color:#1B2A4A;margin-top:28px}</style>
+    </head>
+    <body>
+    <h1>Termeni și Condiții</h1>
+    <p>Ultima actualizare: Aprilie 2026</p>
+    <h2>Serviciul</h2>
+    <p>Meetings.ro oferă servicii de transcriere automată și generare rapoarte AI pentru ședințe profesionale, disponibile prin aplicație mobilă.</p>
+    <h2>Cont și responsabilitate</h2>
+    <p>Ești responsabil pentru securitatea contului tău și pentru conținutul înregistrărilor uploadate. Nu este permisă înregistrarea fără consimțământul participanților.</p>
+    <h2>Planuri și plăți</h2>
+    <p>Planul gratuit include 5 întâlniri pe lună. Abonamentele plătite (Pro, Enterprise) sunt lunare sau anuale, procesate prin Stripe. Anularea se poate face oricând, cu efect la finalul perioadei plătite.</p>
+    <h2>Proprietate intelectuală</h2>
+    <p>Conținutul înregistrărilor și transcrierilor tale îți aparține. Meetings.ro deține drepturile asupra platformei, designului și algoritmilor.</p>
+    <h2>Limitarea răspunderii</h2>
+    <p>Meetings.ro nu garantează acuratețea 100% a transcrierilor sau a rapoartelor generate. Serviciul este furnizat "așa cum este".</p>
+    <h2>Modificări ale termenilor</h2>
+    <p>Ne rezervăm dreptul de a modifica acești termeni. Utilizatorii vor fi notificați prin email cu minim 14 zile înainte.</p>
+    <h2>Contact</h2>
+    <p>hello@meetings.ro</p>
+    </body></html>
+    """)
 
