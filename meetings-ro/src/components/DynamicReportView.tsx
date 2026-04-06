@@ -84,6 +84,7 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [exporting, setExporting] = useState<'pdf' | 'docx' | null>(null);
+  const [isCorrecting, setIsCorrecting] = useState(false);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -211,6 +212,42 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
     } finally {
       setExporting(null);
     }
+  };
+
+  const handleCorrectTranscript = () => {
+    Alert.alert(
+      'Corectează transcrierea',
+      'Claude AI va corecta erorile gramaticale și de transcriere, apoi va regenera raportul. Continui?',
+      [
+        { text: 'Anulează', style: 'cancel' },
+        {
+          text: 'Corectează',
+          onPress: async () => {
+            setIsCorrecting(true);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            try {
+              const res = await fetch(`${API_BASE_URL}/api/meetings/${meetingId}/correct-transcript`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
+              });
+              if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || 'Eroare la corectare');
+              }
+              // Reload to show processing status
+              await loadMeetingData();
+            } catch (error: any) {
+              Alert.alert('Eroare', error.message || 'Nu am putut corecta transcrierea.');
+            } finally {
+              setIsCorrecting(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   if (loading) {
@@ -391,9 +428,33 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
         {/* Transcript */}
         {meeting.transcript && (
           <View className="bg-white p-4 rounded-2xl mt-2">
-            <Text className="text-xs uppercase text-gray-500 font-body mb-2">
-              Transcriere completă
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Text className="text-xs uppercase text-gray-500 font-body">
+                Transcriere completă
+              </Text>
+              {(meeting.status === 'done' || meeting.status === 'processed') && (
+                <Pressable
+                  onPress={handleCorrectTranscript}
+                  disabled={isCorrecting}
+                  style={{
+                    backgroundColor: '#B8962E',
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    borderRadius: 12,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    opacity: isCorrecting ? 0.6 : 1,
+                  }}
+                >
+                  {isCorrecting ? (
+                    <ActivityIndicator size="small" color="#FAF8F3" />
+                  ) : (
+                    <Text style={{ color: '#FAF8F3', fontSize: 12, fontWeight: '600' }}>✦ Corectează</Text>
+                  )}
+                </Pressable>
+              )}
+            </View>
             <Text className="text-gray-700 font-body leading-relaxed">{meeting.transcript}</Text>
           </View>
         )}

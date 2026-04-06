@@ -1103,6 +1103,113 @@ async def regenerate_meeting(meeting_id: str, background_tasks: BackgroundTasks)
     return {"status": "regenerating"}
 
 
+# ---- CORRECT TRANSCRIPT (Claude) ----
+
+@app.post("/api/meetings/{meeting_id}/correct-transcript")
+async def correct_transcript(meeting_id: str, background_tasks: BackgroundTasks):
+    """Use Claude to correct grammar/transcription errors, then re-extract report."""
+    meeting = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Ședința nu a fost găsită")
+
+    if not meeting.get("transcript"):
+        raise HTTPException(status_code=400, detail="Nu există transcriere de corectat")
+
+    # Save original transcript before correction
+    original = meeting.get("transcript_original") or meeting.get("transcript")
+    await meetings_col.update_one(
+        {"_id": ObjectId(meeting_id)},
+        {"$set": {
+            "transcript_original": original,
+            "status": "processing",
+            "error": None,
+            "updated_at": datetime.now(timezone.utc),
+        }}
+    )
+
+    background_tasks.add_task(correct_and_reprocess, meeting_id)
+    return {"status": "correcting"}
+
+
+async def correct_and_reprocess(meeting_id: str):
+    """Background: correct transcript with Claude, then re-extract report."""
+    try:
+        meeting = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
+        if not meeting or not meeting.get("transcript"):
+            return
+
+        # Step 1: Correct transcript with Claude
+        response = await anthropic_client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=8000,
+            system=(
+                "Ești un editor profesionist de transcrieri în limba română. "
+                "Corectează erorile gramaticale, de ortografie și de transcriere. "
+                "Păstrează sensul original și structura textului. "
+                "NU adăuga, nu șterge și nu reformula conținutul — doar corectează greșelile. "
+                "Returnează DOAR textul corectat, fără explicații."
+            ),
+            messages=[{
+                "role": "user",
+                "content": f"Corectează următoarea transcriere:\n\n{meeting['transcript']}"
+            }]
+        )
+
+        corrected_transcript = response.content[0].text.strip()
+
+        # Step 2: Save corrected transcript
+        await meetings_col.update_one(
+            {"_id": ObjectId(meeting_id)},
+            {"$set": {
+                "transcript": corrected_transcript,
+                "transcript_corrected_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc),
+            }}
+        )
+
+        # Step 3: Re-extract report from corrected transcript
+        extracted = await extract_meeting_data(corrected_transcript)
+
+        locality = extracted.get("locality") or meeting.get("locality") or "Necunoscut"
+        created_at = meeting.get("created_at", datetime.now(timezone.utc))
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        title = f"{created_at.strftime('%d.%m.%Y')} | {locality}"
+
+        await meetings_col.update_one(
+            {"_id": ObjectId(meeting_id)},
+            {"$set": {
+                "title": title,
+                "locality": locality,
+                "data_desfasurare": extracted.get("data_desfasurare"),
+                "format_intalnire": extracted.get("format_intalnire"),
+                "loc_desfasurare": extracted.get("loc_desfasurare"),
+                "mod_promovare": extracted.get("mod_promovare"),
+                "obiectiv": extracted.get("obiectiv"),
+                "tematica": extracted.get("tematica"),
+                "scurta_descriere": extracted.get("scurta_descriere"),
+                "numar_participanti": extracted.get("numar_participanti"),
+                "concluzia": extracted.get("concluzia"),
+                "status": "done",
+                "error": None,
+                "updated_at": datetime.now(timezone.utc),
+            }}
+        )
+
+        if locality and locality != "Necunoscut":
+            await localities_col.update_one(
+                {"name": locality},
+                {"$setOnInsert": {"name": locality, "created_at": datetime.now(timezone.utc)}, "$inc": {"count": 1}},
+                upsert=True
+            )
+    except Exception as e:
+        print(f"[CORRECT] Error correcting transcript {meeting_id}: {e}")
+        await meetings_col.update_one(
+            {"_id": ObjectId(meeting_id)},
+            {"$set": {"status": "error", "error": str(e), "updated_at": datetime.now(timezone.utc)}}
+        )
+
+
 async def reprocess_transcript(meeting_id: str):
     """Re-extract data from existing transcript."""
     try:
