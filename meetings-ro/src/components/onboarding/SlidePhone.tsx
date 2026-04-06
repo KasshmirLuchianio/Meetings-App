@@ -1,29 +1,26 @@
 import React, { useRef, useEffect } from 'react';
-import { View, Text, Image, Animated, Easing, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, Animated, Image, Easing, StyleSheet, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const PHONE_WIDTH = SCREEN_WIDTH * 0.52;
+const { width } = Dimensions.get('window');
+
+const PHONE_WIDTH = width * 0.48;
 const PHONE_HEIGHT = PHONE_WIDTH * 2.16;
 
-// Real iPhone screen dimensions for scaling
-const REAL_SCREEN_W = 390;
-const REAL_SCREEN_H = 844;
+// Screen area inside the phone PNG
+const SCREEN_WIDTH = PHONE_WIDTH * 0.74;
+const SCREEN_HEIGHT = PHONE_HEIGHT * 0.82;
+const SCREEN_TOP = PHONE_HEIGHT * 0.08;
+const SCREEN_LEFT = (PHONE_WIDTH - SCREEN_WIDTH) / 2;
 
-// Phone screen area (inside bezels)
-const SCREEN_LEFT = PHONE_WIDTH * 0.08;
-const SCREEN_TOP = PHONE_HEIGHT * 0.12;
-const SCREEN_INNER_W = PHONE_WIDTH * 0.84;
-const SCREEN_INNER_H = PHONE_HEIGHT * 0.80;
-
-const SCALE = SCREEN_INNER_W / REAL_SCREEN_W;
+// Orb sized to 60% of screen width
+const ORB_SIZE = SCREEN_WIDTH * 0.60;
 
 export default function SlidePhone() {
   const orbScale = useRef(new Animated.Value(1)).current;
   const orbRotation = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Orb pulse
     Animated.loop(
       Animated.sequence([
         Animated.timing(orbScale, {
@@ -41,7 +38,6 @@ export default function SlidePhone() {
       ])
     ).start();
 
-    // Orb rotation
     Animated.loop(
       Animated.timing(orbRotation, {
         toValue: 1,
@@ -57,53 +53,36 @@ export default function SlidePhone() {
     outputRange: ['0deg', '360deg'],
   });
 
-  // Manual transform origin compensation (top-left)
-  const offsetX = -(REAL_SCREEN_W * (1 - SCALE)) / 2;
-  const offsetY = -(REAL_SCREEN_H * (1 - SCALE)) / 2;
-
   return (
     <View style={styles.phoneWrapper}>
-
-      {/* iPhone frame */}
+      {/* iPhone frame (on top, z-index 2) */}
       <Image
         source={require('../../../assets/onboarding/phone_mockup.png')}
         style={styles.phone}
         resizeMode="contain"
       />
 
-      {/* Screen content — miniaturized RecordingScreen */}
+      {/* Screen content — clipped to phone screen area */}
       <View style={styles.screen}>
-        <View style={{
-          width: REAL_SCREEN_W,
-          height: REAL_SCREEN_H,
-          transform: [
-            { scale: SCALE },
-            { translateX: offsetX },
-            { translateY: offsetY },
-          ],
-          backgroundColor: '#050508',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
-          {/* Orb — exact RecordingScreen */}
+        {/* Orb centered */}
+        <View style={styles.orbContainer}>
           <Animated.View style={{
-            width: 292,
-            height: 292,
-            borderRadius: 146,
+            width: ORB_SIZE,
+            height: ORB_SIZE,
+            borderRadius: ORB_SIZE / 2,
             overflow: 'hidden',
             transform: [{ scale: orbScale }, { rotate: spin }],
             shadowColor: '#7B2FFF',
             shadowOffset: { width: 0, height: 0 },
             shadowOpacity: 0.8,
-            shadowRadius: 60,
-            elevation: 30,
-            marginBottom: 32,
+            shadowRadius: 40,
+            elevation: 20,
           }}>
             <LinearGradient
               colors={['#7B2FFF', '#00CFFF', '#FF6B9D', '#7B2FFF']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
-              style={{ width: '100%', height: '100%', borderRadius: 146 }}
+              style={{ width: '100%', height: '100%', borderRadius: ORB_SIZE / 2 }}
             />
             <LinearGradient
               colors={['rgba(255,255,255,0.35)', 'rgba(255,255,255,0)']}
@@ -113,46 +92,21 @@ export default function SlidePhone() {
                 position: 'absolute',
                 top: '8%', left: '10%',
                 width: '60%', height: '45%',
-                borderRadius: 146,
+                borderRadius: ORB_SIZE / 2,
               }}
             />
           </Animated.View>
+        </View>
 
-          {/* Timer */}
-          <Text style={{
-            fontSize: 48,
-            fontWeight: '300',
-            color: '#FAF8F3',
-            letterSpacing: 4,
-            marginBottom: 12,
-          }}>00:47</Text>
+        {/* Timer */}
+        <Text style={styles.timer}>00:47</Text>
 
-          {/* Hint */}
-          <Text style={{
-            fontSize: 14,
-            color: 'rgba(250,248,243,0.4)',
-            letterSpacing: 1,
-            marginBottom: 32,
-          }}>Vorbește clar și natural</Text>
+        {/* Hint */}
+        <Text style={styles.hint}>Vorbește clar și natural</Text>
 
-          {/* Stop button */}
-          <View style={{
-            width: 72,
-            height: 72,
-            borderRadius: 36,
-            backgroundColor: 'rgba(250,248,243,0.1)',
-            borderWidth: 1,
-            borderColor: 'rgba(250,248,243,0.2)',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}>
-            <View style={{
-              width: 24,
-              height: 24,
-              borderRadius: 4,
-              backgroundColor: '#FAF8F3',
-            }} />
-          </View>
+        {/* Stop button */}
+        <View style={styles.stopButton}>
+          <View style={styles.stopSquare} />
         </View>
       </View>
     </View>
@@ -165,6 +119,7 @@ const styles = StyleSheet.create({
     height: PHONE_HEIGHT,
     alignItems: 'center',
     justifyContent: 'center',
+    alignSelf: 'center',
   },
   phone: {
     width: PHONE_WIDTH,
@@ -176,10 +131,52 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: SCREEN_TOP,
     left: SCREEN_LEFT,
-    width: SCREEN_INNER_W,
-    height: SCREEN_INNER_H,
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT,
+    backgroundColor: '#050508',
+    borderRadius: 28,
     overflow: 'hidden',
-    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
     zIndex: 1,
+  },
+  orbContainer: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  timer: {
+    position: 'absolute',
+    bottom: '22%',
+    fontSize: 18,
+    fontWeight: '300',
+    color: '#FAF8F3',
+    letterSpacing: 3,
+  },
+  hint: {
+    position: 'absolute',
+    bottom: '16%',
+    fontSize: 7,
+    color: 'rgba(250,248,243,0.4)',
+    letterSpacing: 1,
+  },
+  stopButton: {
+    position: 'absolute',
+    bottom: '6%',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(250,248,243,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(250,248,243,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stopSquare: {
+    width: 10,
+    height: 10,
+    borderRadius: 2,
+    backgroundColor: '#FAF8F3',
   },
 });
