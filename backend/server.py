@@ -354,6 +354,15 @@ async def admin_delete_user(email: str = Query(...), admin_key: str = Query(...)
     return {"message": f"User {email} deleted", "deleted": result.deleted_count}
 
 
+@app.delete("/api/admin/delete-all-users")
+async def admin_delete_all_users(admin_key: str = Query(...)):
+    """Delete ALL users. Requires admin key."""
+    if admin_key != os.environ.get("JWT_SECRET", ""):
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    result = await users_col.delete_many({})
+    return {"message": f"All users deleted", "deleted": result.deleted_count}
+
+
 @app.get("/api/auth/me")
 async def auth_me(request: Request):
     """Get current authenticated user."""
