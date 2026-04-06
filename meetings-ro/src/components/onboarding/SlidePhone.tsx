@@ -19,29 +19,10 @@ const SCREEN_INNER_H = PHONE_HEIGHT * 0.80;
 const SCALE = SCREEN_INNER_W / REAL_SCREEN_W;
 
 export default function SlidePhone() {
-  const floatAnim = useRef(new Animated.Value(0)).current;
   const orbScale = useRef(new Animated.Value(1)).current;
   const orbRotation = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Phone float
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(floatAnim, {
-          toValue: -14,
-          duration: 2200,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(floatAnim, {
-          toValue: 0,
-          duration: 2200,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-
     // Orb pulse
     Animated.loop(
       Animated.sequence([
@@ -81,20 +62,7 @@ export default function SlidePhone() {
   const offsetY = -(REAL_SCREEN_H * (1 - SCALE)) / 2;
 
   return (
-    <Animated.View style={[styles.phoneWrapper, {
-      transform: [{ translateY: floatAnim }],
-    }]}>
-      {/* Shadow under phone */}
-      <Animated.View style={[styles.shadow, {
-        transform: [{ scaleX: floatAnim.interpolate({
-          inputRange: [-14, 0],
-          outputRange: [0.7, 1],
-        }) }],
-        opacity: floatAnim.interpolate({
-          inputRange: [-14, 0],
-          outputRange: [0.3, 0.6],
-        }),
-      }]} />
+    <View style={styles.phoneWrapper}>
 
       {/* iPhone frame */}
       <Image
@@ -187,7 +155,7 @@ export default function SlidePhone() {
           </View>
         </View>
       </View>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -213,14 +181,5 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderRadius: 10,
     zIndex: 1,
-  },
-  shadow: {
-    position: 'absolute',
-    bottom: -20,
-    width: PHONE_WIDTH * 0.7,
-    height: 20,
-    backgroundColor: '#7B2FFF',
-    borderRadius: 50,
-    opacity: 0.4,
   },
 });
