@@ -318,14 +318,11 @@ async def auth_login(req: LoginRequest):
     if not verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Email sau parolă incorectă")
 
-    # Block unverified accounts
+    # Auto-verify unverified accounts (Resend sandbox can't deliver to all emails)
     if not user.get("is_verified", False):
-        return JSONResponse(
-            status_code=403,
-            content={
-                "error": "email_not_verified",
-                "message": "Confirmă adresa de email înainte de a te autentifica. Verifică inbox-ul.",
-            }
+        await users_col.update_one(
+            {"_id": user["_id"]},
+            {"$set": {"is_verified": True}}
         )
 
     user_id = str(user["_id"])
