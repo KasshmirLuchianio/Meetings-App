@@ -6,6 +6,7 @@ import * as Haptics from 'expo-haptics';
 import TopBar from '../src/components/TopBar';
 import AudioRecorder from '../src/components/AudioRecorder';
 import AudioUploader from '../src/components/AudioUploader';
+import OnboardingModal from '../src/components/OnboardingModal';
 import { Mic, Upload, ChevronRight, Crown, AlertTriangle } from 'lucide-react-native';
 import { COLORS } from '../src/constants/theme';
 import { API_BASE_URL, PRICING_PLANS } from '../src/constants/config';
@@ -30,10 +31,16 @@ export default function HomeScreen() {
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [limitMessage, setLimitMessage] = useState('');
   const [usageData, setUsageData] = useState<{ used: number; limit: number; percentage: number } | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then((saved) => {
       if (saved) setVerticalType(saved);
+    }).catch(() => {});
+
+    // Show onboarding on first visit
+    AsyncStorage.getItem('onboarding_completed').then((val) => {
+      if (!val) setShowOnboarding(true);
     }).catch(() => {});
   }, []);
 
@@ -311,6 +318,10 @@ export default function HomeScreen() {
           </View>
         </View>
       </Modal>
+
+      {showOnboarding && (
+        <OnboardingModal onDone={() => setShowOnboarding(false)} />
+      )}
     </View>
   );
 }

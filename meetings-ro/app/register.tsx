@@ -6,8 +6,6 @@ import * as Haptics from 'expo-haptics';
 import { ArrowLeft, User, Mail, Lock, Eye, EyeOff, Building2, Check, X } from 'lucide-react-native';
 import { COLORS } from '../src/constants/theme';
 import { useAuth } from '../src/context/AuthContext';
-import OnboardingModal from '../src/components/OnboardingModal';
-
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function RegisterScreen() {
@@ -21,7 +19,6 @@ export default function RegisterScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [showOnboarding, setShowOnboarding] = useState(false);
 
   // Live password validation
   const passwordChecks = useMemo(() => ({
@@ -53,7 +50,7 @@ export default function RegisterScreen() {
     try {
       await register(name.trim(), email.trim(), password, company.trim() || undefined);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setShowOnboarding(true);
+      router.replace('/');
     } catch (err: any) {
       setError(err.message || 'Eroare la înregistrare. Încearcă din nou.');
     } finally {
@@ -213,12 +210,6 @@ export default function RegisterScreen() {
         </Text>
       </ScrollView>
 
-      {showOnboarding && (
-        <OnboardingModal onDone={() => {
-          setShowOnboarding(false);
-          router.replace('/');
-        }} />
-      )}
     </KeyboardAvoidingView>
   );
 }
