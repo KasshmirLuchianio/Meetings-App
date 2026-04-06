@@ -278,33 +278,35 @@ async def auth_register(req: RegisterRequest):
     # Generate verification token
     verify_token = secrets.token_urlsafe(32)
 
+    now = datetime.now(timezone.utc)
     user_doc = {
         "name": req.name,
         "email": req.email,
         "password_hash": hash_password(req.password),
         "company": req.company,
         "plan": "FREE",
-        "is_verified": False,
-        "verify_token": verify_token,
-        "verify_token_expires": datetime.now(timezone.utc) + timedelta(hours=24),
+        "is_verified": True,
         "meetings_used_this_month": 0,
-        "last_monthly_reset": datetime.now(timezone.utc),
-        "verification_emails_sent": [datetime.now(timezone.utc)],
-        "created_at": datetime.now(timezone.utc),
+        "last_monthly_reset": now,
+        "created_at": now,
     }
     result = await users_col.insert_one(user_doc)
     user_id = str(result.inserted_id)
 
-    # Send verification email
-    try:
-        send_verification_email(req.email, verify_token)
-    except Exception as e:
-        print(f"[Resend] Failed to send verification email to {req.email}: {e}")
+    # Auto-login: return token + user directly
+    token = create_token(user_id, req.email)
 
     return {
-        "message": "Cont creat! Verifică inbox-ul pentru a confirma adresa de email.",
-        "requires_verification": True,
-        "user_id": user_id,
+        "token": token,
+        "user": {
+            "_id": user_id,
+            "name": req.name,
+            "email": req.email,
+            "company": req.company,
+            "plan": "FREE",
+            "meetings_used_this_month": 0,
+            "created_at": now.isoformat(),
+        }
     }
 
 

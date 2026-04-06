@@ -49,15 +49,11 @@ export default function RegisterScreen() {
     setIsLoading(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      await register(name.trim(), email.trim(), password);
-      router.replace('/pricing');
+      await register(name.trim(), email.trim(), password, company.trim() || undefined);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.replace('/');
     } catch (err: any) {
-      if (err.message === 'verification_required') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        router.replace({ pathname: '/login', params: { verificationSent: '1' } });
-      } else {
-        setError(err.message || 'Eroare la înregistrare. Încearcă din nou.');
-      }
+      setError(err.message || 'Eroare la înregistrare. Încearcă din nou.');
     } finally {
       setIsLoading(false);
     }

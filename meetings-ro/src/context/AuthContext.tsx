@@ -9,7 +9,7 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string) => Promise<void>;
+  register: (name: string, email: string, password: string, company?: string) => Promise<void>;
   logout: () => Promise<void>;
   updatePlan: (plan: PricingTier) => void;
   refreshUsage: () => Promise<void>;
@@ -99,11 +99,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.setItem(USER_KEY, JSON.stringify(data.user));
   };
 
-  const register = async (name: string, email: string, password: string) => {
+  const register = async (name: string, email: string, password: string, company?: string) => {
     const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, email, password, company }),
     });
 
     if (!res.ok) {
@@ -113,12 +113,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const data = await res.json();
 
-    // New flow: register returns requires_verification, no auto-login
-    if (data.requires_verification) {
-      throw new Error('verification_required');
-    }
-
-    // Fallback for legacy response with token
     if (data.token && data.user) {
       setUser(data.user);
       setAuthToken(data.token);
