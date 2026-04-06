@@ -38,9 +38,9 @@ export default function HomeScreen() {
       if (saved) setVerticalType(saved);
     }).catch(() => {});
 
-    // Show onboarding on first visit
-    AsyncStorage.getItem('onboarding_completed').then((val) => {
-      if (!val) setShowOnboarding(true);
+    // Force onboarding for testing — remove after confirmed working
+    AsyncStorage.removeItem('onboarding_completed').then(() => {
+      setShowOnboarding(true);
     }).catch(() => {});
   }, []);
 
