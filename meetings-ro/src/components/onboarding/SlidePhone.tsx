@@ -3,8 +3,8 @@ import { View, Image, Animated, Easing, StyleSheet, Dimensions } from 'react-nat
 import OrbMiniature from './OrbMiniature';
 
 const { width } = Dimensions.get('window');
-const PHONE_WIDTH = width * 0.55;
-const PHONE_HEIGHT = PHONE_WIDTH * 2.05;
+const PHONE_WIDTH = width * 0.52;
+const PHONE_HEIGHT = PHONE_WIDTH * 2.16;
 
 export default function SlidePhone() {
   const floatAnim = useRef(new Animated.Value(0)).current;
@@ -51,9 +51,9 @@ export default function SlidePhone() {
         resizeMode="contain"
       />
 
-      {/* Orb pe ecranul telefonului */}
+      {/* Orb pe ecranul telefonului — centrat pe ecran */}
       <View style={styles.orbOnScreen}>
-        <OrbMiniature />
+        <OrbMiniature size={90} />
       </View>
     </Animated.View>
   );
@@ -73,7 +73,8 @@ const styles = StyleSheet.create({
   },
   orbOnScreen: {
     position: 'absolute',
-    top: '28%',
+    top: '30%',
+    alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
   },

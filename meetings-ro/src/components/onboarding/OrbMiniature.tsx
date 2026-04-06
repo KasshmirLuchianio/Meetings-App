@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
-export default function OrbMiniature() {
+export default function OrbMiniature({ size = 100 }: { size?: number }) {
   const scale = useRef(new Animated.Value(1)).current;
   const rotation = useRef(new Animated.Value(0)).current;
   const opacity = useRef(new Animated.Value(0)).current;
@@ -47,7 +47,17 @@ export default function OrbMiniature() {
   });
 
   return (
-    <Animated.View style={[styles.container, {
+    <Animated.View style={[{
+      width: size,
+      height: size,
+      borderRadius: size / 2,
+      overflow: 'hidden',
+      shadowColor: '#7B2FFF',
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.9,
+      shadowRadius: 20,
+      elevation: 20,
+    }, {
       opacity,
       transform: [{ scale }, { rotate: spin }],
     }]}>
@@ -55,7 +65,7 @@ export default function OrbMiniature() {
         colors={['#7B2FFF', '#00CFFF', '#FF6B9D', '#7B2FFF']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={styles.orb}
+        style={{ width: '100%', height: '100%', borderRadius: size / 2 }}
       />
       <LinearGradient
         colors={['rgba(255,255,255,0.4)', 'rgba(255,255,255,0)']}

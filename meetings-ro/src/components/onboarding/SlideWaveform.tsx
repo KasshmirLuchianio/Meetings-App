@@ -11,13 +11,13 @@ export default function SlideWaveform() {
     Animated.loop(
       Animated.sequence([
         Animated.timing(translateX, {
-          toValue: -20,
+          toValue: -15,
           duration: 2000,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(translateX, {
-          toValue: 20,
+          toValue: 15,
           duration: 2000,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
@@ -28,13 +28,13 @@ export default function SlideWaveform() {
     Animated.loop(
       Animated.sequence([
         Animated.timing(scale, {
-          toValue: 1.08,
+          toValue: 1.06,
           duration: 1800,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(scale, {
-          toValue: 0.95,
+          toValue: 1.0,
           duration: 1800,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
@@ -56,7 +56,7 @@ export default function SlideWaveform() {
 
 const styles = StyleSheet.create({
   waveform: {
-    width: width * 0.85,
-    height: 200,
+    width: width * 0.90,
+    height: 220,
   },
 });
