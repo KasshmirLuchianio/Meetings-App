@@ -1,0 +1,167 @@
+version: "3.9"
+
+# ============================================================
+# Meetings Platform — On-Premise Docker Compose Stack
+# Zero external network calls. Fully air-gapped capable.
+#
+# Services:
+#   mongodb   — database
+#   backend   — FastAPI application
+#   ollama    — local LLM (Llama3/Mistral)
+#   smtp      — local mail server (Mailhog for dev / Postfix for prod)
+#   nginx     — reverse proxy + SSL termination
+#
+# Usage:
+#   1. Copy .env.example to .env and fill in values
+#   2. docker compose up -d
+#   3. docker compose exec backend python migrations/002_add_tenant_id.py
+#   4. Open https://localhost in browser
+# ============================================================
+
+services:
+
+  # ── MongoDB ──────────────────────────────────────────────
+  mongodb:
+    image: mongo:7.0
+    container_name: meetings_mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS:-changeme}
+      MONGO_INITDB_DATABASE: ${DB_NAME:-meetings_platform}
+    volumes:
+      - mongo_data:/data/db
+      - mongo_config:/data/configdb
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Ollama (local LLM) ────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: meetings_ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+    networks:
+      - internal
+    # Pull model on first start
+    entrypoint: ["/bin/sh", "-c",
+      "ollama serve & sleep 5 && ollama pull ${OLLAMA_MODEL:-llama3:8b-instruct} && wait"]
+    environment:
+      OLLAMA_KEEP_ALIVE: "24h"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # Remove the 'deploy' block above if no GPU is available.
+    # CPU-only works but is slower (8-30s per request with llama3:8b).
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  # ── Backend (FastAPI) ─────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: meetings_backend
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MONGO_URL: mongodb://${MONGO_USER:-admin}:${MONGO_PASS:-changeme}@mongodb:27017/${DB_NAME:-meetings_platform}?authSource=admin
+      DB_NAME: ${DB_NAME:-meetings_platform}
+      JWT_SECRET: ${JWT_SECRET}
+      INSTITUTION_NAME: ${INSTITUTION_NAME:-Meetings Platform}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost,http://localhost:3000}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3:8b-instruct}
+      WHISPER_MODEL_PATH: /opt/models/whisper
+      WHISPER_MODEL_SIZE: ${WHISPER_MODEL_SIZE:-medium}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+      SMTP_HOST: smtp
+      SMTP_PORT: 1025
+      SMTP_FROM: ${SMTP_FROM:-no-reply@meetings.local}
+      UPLOAD_DIR: /app/uploads
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-100}
+      ALLOW_SELF_REGISTER: ${ALLOW_SELF_REGISTER:-false}
+      LICENSE_MAX_USERS: ${LICENSE_MAX_USERS:--1}
+      LICENSE_MAX_MEETINGS_PER_MONTH: ${LICENSE_MAX_MEETINGS_PER_MONTH:--1}
+      # Optional: keep Anthropic as LLM fallback during migration
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - uploads:/app/uploads
+      - whisper_models:/opt/models/whisper
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── SMTP (Mailhog — dev / replace with Postfix for prod) ──
+  smtp:
+    image: mailhog/mailhog:latest
+    container_name: meetings_smtp
+    restart: unless-stopped
+    networks:
+      - internal
+    ports:
+      - "8025:8025"   # Mailhog web UI — accessible at http://localhost:8025
+    # For production, replace with:
+    # image: boky/postfix
+    # environment:
+    #   RELAYHOST: your-smtp-relay.institution.ro
+
+  # ── Nginx (reverse proxy + SSL) ───────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: meetings_nginx
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro   # mount self-signed or institution cert
+    networks:
+      - internal
+      - external
+
+# ── Volumes ───────────────────────────────────────────────────
+volumes:
+  mongo_data:
+    driver: local
+  mongo_config:
+    driver: local
+  ollama_models:
+    driver: local
+  whisper_models:
+    driver: local
+  uploads:
+    driver: local
+
+# ── Networks ──────────────────────────────────────────────────
+networks:
+  internal:
+    driver: bridge
+    internal: true    # no external internet access from internal services
+  external:
+    driver: bridge    # only nginx has external access
