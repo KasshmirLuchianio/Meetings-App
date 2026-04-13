@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { View, Text, Animated, Image, Easing, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, Animated, Easing, StyleSheet, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const { width } = Dimensions.get('window');
@@ -55,14 +55,7 @@ export default function SlidePhone() {
 
   return (
     <View style={styles.phoneWrapper}>
-      {/* iPhone frame (on top, z-index 2) */}
-      <Image
-        source={require('../../../assets/onboarding/phone_mockup.png')}
-        style={styles.phone}
-        resizeMode="contain"
-      />
-
-      {/* Screen content — clipped to phone screen area */}
+      {/* Screen content */}
       <View style={styles.screen}>
         {/* Orb centered */}
         <View style={styles.orbContainer}>
@@ -128,17 +121,13 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   screen: {
-    position: 'absolute',
-    top: SCREEN_TOP,
-    left: SCREEN_LEFT,
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
+    width: PHONE_WIDTH,
+    height: PHONE_HEIGHT,
     backgroundColor: '#050508',
-    borderRadius: 28,
+    borderRadius: 36,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 1,
   },
   orbContainer: {
     position: 'absolute',
