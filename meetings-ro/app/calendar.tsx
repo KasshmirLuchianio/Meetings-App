@@ -13,6 +13,7 @@ import { Calendar as CalendarIcon, ChevronRight } from 'lucide-react-native';
 import { Calendar } from 'react-native-calendars';
 import TopBar from '../src/components/TopBar';
 import { API_BASE_URL } from '../src/constants/config';
+import { authenticatedFetch } from '../src/utils/authenticatedFetch';
 import { COLORS } from '../src/constants/theme';
 
 interface Meeting {
@@ -81,7 +82,7 @@ export default function CalendarScreen() {
     }
 
     try {
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${API_BASE_URL}/api/meetings/calendar-dates?year=${year}&month=${month}`
       );
       if (!response.ok) throw new Error('Failed to fetch calendar dates');
@@ -116,7 +117,7 @@ export default function CalendarScreen() {
     }
 
     try {
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${API_BASE_URL}/api/meetings/calendar-dates?year=${year}&month=${month}`
       );
       if (!response.ok) return;
@@ -145,7 +146,7 @@ export default function CalendarScreen() {
   const fetchDayMeetings = async (date: string) => {
     setLoading(true);
     try {
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${API_BASE_URL}/api/meetings/calendar-by-date?date=${date}`
       );
       if (!response.ok) throw new Error('Failed to fetch day meetings');
