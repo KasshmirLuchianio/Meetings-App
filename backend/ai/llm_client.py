@@ -68,6 +68,104 @@ async def extract_meeting_data(
         raise RuntimeError(f"Toate metodele LLM au eșuat: {e}")
 
 
+async def generate_proces_verbal_report(
+    transcript: str,
+    diarized_segments: list,
+    institution_name: str,
+) -> dict:
+    """
+    Structure a raw meeting transcript into a Romanian institutional 'Proces Verbal' JSON.
+
+    Uses diarized_segments (speaker-labelled chunks) when available;
+    falls back to plain transcript text.
+
+    Returns a dict matching the schema:
+    {
+      antet: {institutie, tip_sedinta, data, ora_inceput, ora_sfarsit, locatie},
+      participanti: [{nume, functie}],
+      ordine_de_zi: [str],
+      dezbateri: [{punct, titlu, interventii: [{speaker, functie, continut, timestamp}]}],
+      hotarari: [str],
+      observatii: str | null
+    }
+    """
+    system = f"""Ești un asistent specializat în redactarea proceselor verbale pentru instituții publice din România.
+Convertești transcrieri brute în documente structurate de tip "Proces Verbal".
+
+Instituția: {institution_name}
+
+Regulament:
+- Returnează EXCLUSIV un obiect JSON valid. Niciun text înainte sau după.
+- Dacă un câmp nu poate fi dedus din transcriere, setează valoarea la null.
+- Nu inventa nume, roluri sau decizii care nu apar în sursă.
+- Textul câmpurilor trebuie să fie în limba română.
+
+Schema JSON obligatorie:
+{{
+  "antet": {{
+    "institutie": string,
+    "tip_sedinta": string,
+    "data": string,
+    "ora_inceput": string | null,
+    "ora_sfarsit": string | null,
+    "locatie": string | null
+  }},
+  "participanti": [
+    {{ "nume": string, "functie": string }}
+  ],
+  "ordine_de_zi": [string],
+  "dezbateri": [
+    {{
+      "punct": number,
+      "titlu": string,
+      "interventii": [
+        {{
+          "speaker": string,
+          "functie": string,
+          "continut": string,
+          "timestamp": string | null
+        }}
+      ]
+    }}
+  ],
+  "hotarari": [string],
+  "observatii": string | null
+}}"""
+
+    # Build user message from diarized segments or plain transcript
+    if diarized_segments:
+        lines = []
+        for seg in diarized_segments:
+            speaker   = seg.get("speaker", "Vorbitor")
+            role      = seg.get("role", "")
+            timestamp = seg.get("timestamp", "")
+            text      = seg.get("text", "")
+            spk_label = f"{speaker}"
+            if role:
+                spk_label += f" ({role})"
+            if timestamp:
+                spk_label += f" [{timestamp}]"
+            lines.append(f"{spk_label}: {text}")
+        input_text = "\n".join(lines)
+    else:
+        input_text = transcript
+
+    user_message = (
+        "Structurează următoarea transcriere de ședință în format Proces Verbal:\n\n"
+        + input_text
+    )
+
+    try:
+        return await _call_ollama(system, user_message)
+    except Exception as e:
+        print(f"[LLM] generate_proces_verbal Ollama failed: {e}. Trying Anthropic...")
+
+    try:
+        return await _call_anthropic(system, user_message)
+    except Exception as e:
+        raise RuntimeError(f"generate_proces_verbal: toate metodele LLM au eșuat: {e}")
+
+
 async def correct_transcript_text(transcript: str) -> str:
     """Correct grammar/transcription errors using local LLM or Anthropic fallback."""
     system = (

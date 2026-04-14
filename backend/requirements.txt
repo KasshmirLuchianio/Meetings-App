@@ -15,6 +15,14 @@ pymongo>=4.5.0
 faster-whisper>=1.0.0
 ctranslate2>=4.0.0
 
+# ==================== Local AI — Speaker Diarization (optional) ====================
+# Requires PYANNOTE_AUTH_TOKEN env var (free HuggingFace account).
+# Remove from production if pyannote is not needed (saves ~2GB disk).
+pyannote.audio>=3.1.0
+torch>=2.0.0
+torchaudio>=2.0.0
+scipy>=1.11.0
+
 # ==================== Local AI — LLM (Ollama client) ====================
 # Uses OpenAI-compatible endpoint — same SDK, different base_url
 openai>=1.0.0

@@ -33,6 +33,12 @@ class Settings:
         if o.strip()
     ]
 
+    # ── Speaker Diarization (pyannote) ───────────────────────────────────────
+    # Free HuggingFace token; accept model terms at:
+    # huggingface.co/pyannote/speaker-diarization-3.1
+    # Leave empty to disable diarization (transcription still works).
+    PYANNOTE_AUTH_TOKEN: str = os.environ.get("PYANNOTE_AUTH_TOKEN", "")
+
     # ── Local AI — Whisper ────────────────────────────────────────────────────
     WHISPER_MODEL_PATH: str = os.environ.get("WHISPER_MODEL_PATH", "/opt/models/whisper")
     WHISPER_MODEL_SIZE: str = os.environ.get("WHISPER_MODEL_SIZE", "medium")

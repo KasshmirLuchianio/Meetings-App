@@ -461,6 +461,200 @@ async def correct_transcript(
     return {"status": "correcting"}
 
 
+# ── Speaker onboarding ────────────────────────────────────────────────────────
+
+class SpeakerOnboardResponse(BaseModel):
+    participant_id: str
+    name: Optional[str] = None
+    role: Optional[str] = None
+    transcribed_text: Optional[str] = None
+    has_embedding: bool = False
+
+
+@router.post("/{meeting_id}/speakers/onboard", response_model=SpeakerOnboardResponse)
+async def onboard_speaker(
+    meeting_id: str,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    name: Optional[str] = None,
+    role: Optional[str] = None,
+    user: dict = Depends(require_role("secretary", "clerk", "admin")),
+):
+    """
+    Upload a short voice sample (5–10s) for a participant.
+    Backend transcribes it and extracts a speaker embedding for later diarization.
+    Voice files are stored temporarily and deleted at session end (GDPR).
+    """
+    await verify_meeting_ownership(meeting_id, user)
+
+    # Save the voice sample audio
+    tenant_dir = settings.UPLOAD_DIR / str(user["tenant_id"]) / "onboarding"
+    tenant_dir.mkdir(parents=True, exist_ok=True)
+    participant_id = str(uuid.uuid4())
+    ext = (file.filename or "sample").rsplit(".", 1)[-1].lower()
+    if ext not in {"webm", "wav", "mp3", "ogg", "m4a", "mp4"}:
+        ext = "webm"
+    sample_path = str(tenant_dir / f"{meeting_id}_{participant_id}.{ext}")
+
+    content = await file.read()
+    if len(content) > 20 * 1024 * 1024:   # 20 MB cap on voice samples
+        raise HTTPException(status_code=413, detail="Eșantionul vocal depășește 20MB")
+
+    import aiofiles as _aiofiles
+    async with _aiofiles.open(sample_path, "wb") as f_out:
+        await f_out.write(content)
+
+    # Transcribe + embed in background, store result on meeting document
+    background_tasks.add_task(
+        _process_voice_sample,
+        meeting_id, participant_id, sample_path,
+        name, role,
+    )
+
+    return SpeakerOnboardResponse(
+        participant_id=participant_id,
+        name=name,
+        role=role,
+    )
+
+
+async def _process_voice_sample(
+    meeting_id: str,
+    participant_id: str,
+    audio_path: str,
+    provided_name: Optional[str],
+    provided_role: Optional[str],
+):
+    """Background: transcribe voice sample, extract embedding, store in meeting."""
+    from ai.diarization import transcribe_voice_sample, extract_embedding, embedding_to_b64
+
+    try:
+        info = await transcribe_voice_sample(audio_path)
+        name = provided_name or info.get("name") or f"Participant {participant_id[:4]}"
+        role = provided_role or info.get("role") or ""
+
+        emb_b64 = None
+        emb = await extract_embedding(audio_path)
+        if emb is not None:
+            emb_b64 = embedding_to_b64(emb)
+
+        profile = {
+            "participant_id": participant_id,
+            "name": name,
+            "role": role,
+            "audio_path": audio_path,
+            "transcribed_text": info.get("text", ""),
+            "embedding": emb_b64,
+        }
+
+        await meetings_col().update_one(
+            {"_id": ObjectId(meeting_id)},
+            {"$push": {"voice_profiles": profile},
+             "$set": {"updated_at": datetime.now(timezone.utc)}},
+        )
+        print(f"[Onboarding] Stored profile for '{name}' in meeting {meeting_id}.")
+    except Exception as exc:
+        print(f"[Onboarding] _process_voice_sample failed: {exc}")
+
+
+@router.get("/{meeting_id}/speakers")
+async def list_speakers(
+    meeting_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """List onboarded speaker profiles for a meeting (names/roles only — no embeddings)."""
+    meeting = await verify_meeting_ownership(meeting_id, user)
+    profiles = meeting.get("voice_profiles", [])
+    # Strip embedding vectors before returning (large binary data, not needed by UI)
+    safe = [
+        {k: v for k, v in p.items() if k != "embedding"}
+        for p in profiles
+    ]
+    return {"speakers": safe, "count": len(safe)}
+
+
+@router.delete("/{meeting_id}/speakers")
+async def delete_speakers(
+    meeting_id: str,
+    user: dict = Depends(require_role("secretary", "admin")),
+):
+    """
+    GDPR cleanup: delete all voice sample files and wipe voice_profiles from the meeting.
+    Call this when the session ends.
+    """
+    meeting = await verify_meeting_ownership(meeting_id, user)
+    profiles = meeting.get("voice_profiles", [])
+    deleted_files = 0
+    for profile in profiles:
+        audio_path = profile.get("audio_path", "")
+        if audio_path and os.path.exists(audio_path):
+            try:
+                os.remove(audio_path)
+                deleted_files += 1
+            except OSError:
+                pass
+
+    await meetings_col().update_one(
+        {"_id": ObjectId(meeting_id)},
+        {"$set": {"voice_profiles": [], "updated_at": datetime.now(timezone.utc)}},
+    )
+    return {"status": "deleted", "files_removed": deleted_files}
+
+
+# ── Report generation ──────────────────────────────────────────────────────────
+
+@router.post("/{meeting_id}/generate-report")
+async def generate_report(
+    meeting_id: str,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(require_role("secretary", "admin")),
+):
+    """
+    Trigger LLM structuring pipeline to produce a Proces Verbal JSON.
+    The meeting must have a transcript (status='done').
+    Poll GET /{meeting_id} and check report_status ('generating'|'done'|'error').
+    """
+    meeting = await verify_meeting_ownership(meeting_id, user)
+    if not meeting.get("transcript"):
+        raise HTTPException(
+            status_code=400,
+            detail="Nu există transcriere. Procesați mai întâi înregistrarea audio.",
+        )
+    if meeting.get("report_status") == "generating":
+        return {"status": "already_generating"}
+
+    await meetings_col().update_one(
+        {"_id": ObjectId(meeting_id)},
+        {"$set": {
+            "report_status": "generating",
+            "report_error":  None,
+            "updated_at":    datetime.now(timezone.utc),
+        }},
+    )
+    background_tasks.add_task(run_generate_report, meeting_id)
+    return {"status": "generating"}
+
+
+@router.get("/{meeting_id}/report")
+async def get_report(
+    meeting_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Return the structured Proces Verbal JSON for a meeting."""
+    meeting = await verify_meeting_ownership(meeting_id, user)
+    report_status = meeting.get("report_status")
+    if not report_status:
+        raise HTTPException(
+            status_code=404,
+            detail="Raportul nu a fost generat. Apelați POST /generate-report mai întâi.",
+        )
+    return {
+        "report_status": report_status,
+        "report_error":  meeting.get("report_error"),
+        "proces_verbal": meeting.get("proces_verbal"),
+    }
+
+
 # ── Action items ───────────────────────────────────────────────────────────────
 
 @router.patch("/{meeting_id}/actions/{action_id}")
@@ -609,10 +803,28 @@ async def process_meeting(meeting_id: str):
 
         print(f"[AI] Transcribing {meeting_id}...")
         transcription = await transcribe_audio(audio_path)
+
+        # Speaker diarization (if voice profiles were onboarded)
+        voice_profiles = meeting.get("voice_profiles", [])
+        diarized_segments = []
+        try:
+            from ai.diarization import get_diarized_transcript
+            diarized_segments = await get_diarized_transcript(
+                audio_path,
+                transcription["segments"],
+                voice_profiles,
+            )
+        except Exception as diar_exc:
+            print(f"[AI] Diarization failed (non-fatal): {diar_exc}")
+
         await meetings_col().update_one(
             {"_id": ObjectId(meeting_id)},
-            {"$set": {"transcript": transcription["text"], "segments": transcription["segments"],
-                       "updated_at": datetime.now(timezone.utc)}},
+            {"$set": {
+                "transcript":        transcription["text"],
+                "segments":          transcription["segments"],
+                "diarized_segments": diarized_segments,
+                "updated_at":        datetime.now(timezone.utc),
+            }},
         )
 
         vertical_type = meeting.get("vertical_type", "GAL")
@@ -682,6 +894,44 @@ async def reprocess_transcript(meeting_id: str):
         await meetings_col().update_one(
             {"_id": ObjectId(meeting_id)},
             {"$set": {"status": "error", "error": str(e), "updated_at": datetime.now(timezone.utc)}},
+        )
+
+
+async def run_generate_report(meeting_id: str):
+    """Background task: LLM structuring into Proces Verbal JSON."""
+    from ai.llm_client import generate_proces_verbal_report
+    try:
+        meeting = await meetings_col().find_one({"_id": ObjectId(meeting_id)})
+        if not meeting:
+            return
+
+        transcript = meeting.get("transcript", "")
+        diarized   = meeting.get("diarized_segments", [])
+        from config import settings as _s
+        institution = _s.INSTITUTION_NAME
+
+        print(f"[Report] Generating Proces Verbal for {meeting_id}...")
+        report = await generate_proces_verbal_report(transcript, diarized, institution)
+
+        await meetings_col().update_one(
+            {"_id": ObjectId(meeting_id)},
+            {"$set": {
+                "proces_verbal":  report,
+                "report_status":  "done",
+                "report_error":   None,
+                "updated_at":     datetime.now(timezone.utc),
+            }},
+        )
+        print(f"[Report] Proces Verbal done for {meeting_id}.")
+    except Exception as exc:
+        import traceback; traceback.print_exc()
+        await meetings_col().update_one(
+            {"_id": ObjectId(meeting_id)},
+            {"$set": {
+                "report_status": "error",
+                "report_error":  str(exc),
+                "updated_at":    datetime.now(timezone.utc),
+            }},
         )
 
 

@@ -17,6 +17,7 @@ from db.collections import meetings_col
 
 router = APIRouter(prefix="/api/meetings", tags=["export"])
 
+
 DEJAVU_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 DEJAVU_BOLD_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
@@ -266,5 +267,87 @@ async def export_docx(
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ── Proces Verbal DOCX ────────────────────────────────────────────────────────
+
+@router.get("/{meeting_id}/export/proces-verbal/docx")
+async def export_proces_verbal_docx(
+    meeting_id: str,
+    user: dict = Depends(require_permission("export")),
+):
+    """
+    Export a full Romanian institutional 'Proces Verbal' DOCX.
+    Requires a structured report (POST /generate-report must have been called first).
+    Times New Roman 12pt, 1.5 line spacing, A4, signature blocks.
+    """
+    from documents.proces_verbal import generate_docx
+    from config import settings
+
+    meeting = await get_meeting_for_export(meeting_id, user)
+
+    if not meeting.get("transcript") and not meeting.get("diarized_segments"):
+        raise HTTPException(
+            status_code=400,
+            detail="Nu există transcriere pentru export.",
+        )
+
+    buf = generate_docx(meeting, settings.INSTITUTION_NAME)
+    title = meeting.get("title") or "Proces_Verbal"
+    safe_title = _safe_filename(title)
+    date_str = _format_date(meeting.get("date", "")).replace(".", "-").replace(" ", "_").replace(":", "-")
+    filename = f"proces_verbal_{safe_title}_{date_str}.docx"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ── Proces Verbal PDF ─────────────────────────────────────────────────────────
+
+@router.get("/{meeting_id}/export/proces-verbal/pdf")
+async def export_proces_verbal_pdf(
+    meeting_id: str,
+    user: dict = Depends(require_permission("export")),
+):
+    """
+    Export 'Proces Verbal' as PDF via LibreOffice --headless conversion.
+    Falls back to returning DOCX with a 400 if LibreOffice is not installed.
+    """
+    from documents.proces_verbal import generate_docx, generate_pdf_from_docx
+    from config import settings
+
+    meeting = await get_meeting_for_export(meeting_id, user)
+
+    if not meeting.get("transcript") and not meeting.get("diarized_segments"):
+        raise HTTPException(
+            status_code=400,
+            detail="Nu există transcriere pentru export.",
+        )
+
+    docx_buf = generate_docx(meeting, settings.INSTITUTION_NAME)
+    pdf_buf  = generate_pdf_from_docx(docx_buf)
+
+    title = meeting.get("title") or "Proces_Verbal"
+    safe_title = _safe_filename(title)
+    date_str = _format_date(meeting.get("date", "")).replace(".", "-").replace(" ", "_").replace(":", "-")
+
+    if pdf_buf is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "LibreOffice nu este instalat pe server. "
+                "Folosiți /export/proces-verbal/docx și convertiți manual."
+            ),
+        )
+
+    filename = f"proces_verbal_{safe_title}_{date_str}.pdf"
+    return StreamingResponse(
+        pdf_buf,
+        media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
