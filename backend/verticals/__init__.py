@@ -1,6 +1,7 @@
 """
 Verticals Registry
 """
+from .general import GENERAL_CONFIG
 from .gal import GAL_CONFIG
 from .journalism import JOURNALISM_CONFIG
 from .legal import LEGAL_CONFIG
@@ -11,6 +12,7 @@ from .base import VerticalConfig
 
 
 VERTICALS = {
+    "GENERAL": GENERAL_CONFIG,
     "GAL": GAL_CONFIG,
     "JOURNALISM": JOURNALISM_CONFIG,
     "LEGAL": LEGAL_CONFIG,
@@ -21,8 +23,8 @@ VERTICALS = {
 
 
 def get_vertical_config(vertical_type: str) -> VerticalConfig:
-    """Get config for a vertical type, default to GAL"""
-    return VERTICALS.get(vertical_type, GAL_CONFIG)
+    """Get config for a vertical type, default to GENERAL"""
+    return VERTICALS.get(vertical_type, GENERAL_CONFIG)
 
 
 def list_verticals() -> list:

@@ -7,28 +7,17 @@ import TopBar from '../src/components/TopBar';
 import AudioRecorder from '../src/components/AudioRecorder';
 import AudioUploader from '../src/components/AudioUploader';
 import OnboardingModal from '../src/components/OnboardingModal';
-import { Mic, Upload, ChevronRight, Crown, AlertTriangle } from 'lucide-react-native';
+import { Mic, Upload, Crown, AlertTriangle } from 'lucide-react-native';
 import { COLORS } from '../src/constants/theme';
 import { API_BASE_URL, PRICING_PLANS } from '../src/constants/config';
 import { useAuth } from '../src/context/AuthContext';
 import { authenticatedFetch } from '../src/utils/authenticatedFetch';
 
-const STORAGE_KEY = 'selected_vertical';
-
-const VERTICAL_LABELS: Record<string, string> = {
-  GAL: '🏛️ GAL',
-  JOURNALISM: '📰 Jurnalism',
-  LEGAL: '⚖️ Legal',
-  BANKING: '🏦 Banking',
-  HEALTHCARE: '🏥 Sănătate',
-  STARTUPS: '🚀 Startups',
-};
 
 export default function HomeScreen() {
   const router = useRouter();
   const { isAuthenticated, isLoading, user, token, refreshUsage } = useAuth();
   const [activeTab, setActiveTab] = useState<'record' | 'upload'>('record');
-  const [verticalType, setVerticalType] = useState<string>('GAL');
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [limitMessage, setLimitMessage] = useState('');
   const [usageData, setUsageData] = useState<{ used: number; limit: number; percentage: number } | null>(null);
@@ -57,10 +46,6 @@ export default function HomeScreen() {
   };
 
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY).then((saved) => {
-      if (saved) setVerticalType(saved);
-    }).catch(() => {});
-
     // Show onboarding on first visit
     AsyncStorage.getItem('onboarding_completed').then((val) => {
       if (!val) setShowOnboarding(true);
@@ -97,7 +82,7 @@ export default function HomeScreen() {
       const createRes = await authenticatedFetch(`${API_BASE_URL}/api/meetings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vertical_type: verticalType }),
+        body: JSON.stringify({ vertical_type: 'GENERAL' }),
       });
       if (createRes.status === 402) {
         const err = await createRes.json().catch(() => ({ limit: 0, plan: 'free' }));
@@ -263,7 +248,6 @@ export default function HomeScreen() {
           ) : (
             <AudioUploader
               onUploadComplete={handleUploadComplete}
-              verticalType={verticalType}
               onLimitReached={(msg) => {
                 setLimitMessage(msg);
                 setShowLimitModal(true);
@@ -272,24 +256,6 @@ export default function HomeScreen() {
           )}
         </View>
 
-        {/* Vertical Selector Quick */}
-        <Pressable
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.navigate('/onboarding');
-          }}
-          className="mt-4 p-4 bg-white rounded-xl flex-row items-center justify-between active:bg-gray-50"
-        >
-          <View>
-            <Text className="text-navy text-sm font-heading mb-0.5">
-              Domeniu: {VERTICAL_LABELS[verticalType] || verticalType}
-            </Text>
-            <Text className="text-gray-500 text-xs font-body">
-              Apasă pentru a schimba verticala
-            </Text>
-          </View>
-          <ChevronRight size={18} color="#9CA3AF" />
-        </Pressable>
       </ScrollView>
 
       {/* Plan Limit Modal */}

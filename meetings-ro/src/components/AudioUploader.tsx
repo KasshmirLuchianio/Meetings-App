@@ -17,7 +17,6 @@ interface UploadProgress {
 
 interface AudioUploaderProps {
   onUploadComplete: (meetingId: string) => void;
-  verticalType?: string;
   onLimitReached?: (message: string) => void;
 }
 
@@ -35,7 +34,7 @@ const getMimeType = (filename: string): string => {
   return map[ext || ''] || 'audio/mpeg';
 };
 
-export default function AudioUploader({ onUploadComplete, verticalType = 'GAL', onLimitReached }: AudioUploaderProps) {
+export default function AudioUploader({ onUploadComplete, onLimitReached }: AudioUploaderProps) {
   const router = useRouter();
   const [selectedFile, setSelectedFile] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
@@ -148,7 +147,7 @@ export default function AudioUploader({ onUploadComplete, verticalType = 'GAL', 
       const createResponse = await authenticatedFetch(`${API_BASE_URL}/api/meetings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vertical_type: verticalType }),
+        body: JSON.stringify({ vertical_type: 'GENERAL' }),
       });
 
       if (createResponse.status === 402) {

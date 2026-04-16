@@ -29,14 +29,6 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
   error:        { label: 'Eroare',        color: '#991B1B', bg: '#FEE2E2' },
 };
 
-const VERTICAL_LABELS: Record<string, string> = {
-  GAL: 'Grup de Actiune Locala',
-  JOURNALISM: 'Jurnalism',
-  LEGAL: 'Juridic',
-  BANKING: 'Financiar-Bancar',
-  HEALTHCARE: 'Sanatate',
-  STARTUPS: 'Startup & Inovatie',
-};
 
 const FINAL_STATUSES = ['processed', 'done', 'failed', 'error'];
 
@@ -331,13 +323,6 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
       >
         {/* ── DOCUMENT HEADER ── */}
         <View style={s.docHeader}>
-          {/* Vertical badge */}
-          <View style={s.verticalBadge}>
-            <Text style={s.verticalBadgeText}>
-              {VERTICAL_LABELS[verticalType] || verticalType}
-            </Text>
-          </View>
-
           {/* Title */}
           <Text style={s.docTitle}>
             {meeting.title || 'Raport intalnire'}
