@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
-import { Home, FolderOpen, Calendar, Settings, X, Crown, LogOut, CreditCard, Trash2 } from 'lucide-react-native';
+import { Home, FolderOpen, Calendar, X, Crown, LogOut, CreditCard, Trash2 } from 'lucide-react-native';
 import { COLORS } from '../constants/theme';
 import { API_BASE_URL } from '../constants/config';
 import { useDrawer } from '../context/DrawerContext';
@@ -159,11 +159,6 @@ export default function SlideDrawer() {
           </Pressable>
 
           <View style={styles.separator} />
-
-          <Pressable onPress={() => handleNavigate('/onboarding')} style={styles.menuItem}>
-            <Settings size={20} color={COLORS.navy} />
-            <Text style={styles.menuText}>Verticale</Text>
-          </Pressable>
 
           <Pressable onPress={() => handleNavigate('/pricing')} style={styles.menuItem}>
             <CreditCard size={20} color={COLORS.navy} />
