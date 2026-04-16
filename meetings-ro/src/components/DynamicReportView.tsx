@@ -292,10 +292,7 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
   };
 
   // ── Check if report has content ─────────────────────────
-  const hasReportContent = verticalType === 'GAL'
-    ? !!(meeting.data_desfasurare || meeting.format_intalnire || meeting.loc_desfasurare ||
-         meeting.obiectiv || meeting.tematica || meeting.scurta_descriere || meeting.concluzia)
-    : !!(meeting.vertical_config && Object.keys(meeting.vertical_config).length > 0);
+  const hasReportContent = !!(meeting.vertical_config && Object.keys(meeting.vertical_config).length > 0);
 
   // ── Diarized transcript ─────────────────────────────────
   const diarized: DiarizedEntry[] = meeting.diarized_transcript || [];
@@ -399,55 +396,71 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
           </View>
         )}
 
-        {/* ── REPORT BODY ── */}
-        {isDone && hasReportContent && (
+        {/* ── EXPORT & REPORT CARD ── */}
+        {isDone && (
           <View style={s.reportContainer}>
             {/* Decorative top line */}
             <View style={s.reportTopLine} />
 
-            {/* GAL-specific fields */}
-            {verticalType === 'GAL' ? (
+            {/* Export buttons inside card */}
+            <View style={s.exportInCard}>
+              <Text style={s.exportInCardLabel}>Exporta raportul</Text>
+              <View style={s.exportRow}>
+                <Pressable
+                  onPress={() => handleExport('pdf')}
+                  disabled={exporting !== null}
+                  style={[s.exportBtn, s.exportBtnPdf]}
+                >
+                  {exporting === 'pdf' ? (
+                    <ActivityIndicator size={18} color="#FFFFFF" />
+                  ) : (
+                    <Download size={18} color="#FFFFFF" />
+                  )}
+                  <Text style={s.exportBtnTextPdf}>
+                    {exporting === 'pdf' ? 'Se exporta...' : 'Descarca PDF'}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => handleExport('docx')}
+                  disabled={exporting !== null}
+                  style={[s.exportBtn, s.exportBtnDocx]}
+                >
+                  {exporting === 'docx' ? (
+                    <ActivityIndicator size={18} color={COLORS.navy} />
+                  ) : (
+                    <FileText size={18} color={COLORS.navy} />
+                  )}
+                  <Text style={s.exportBtnTextDocx}>
+                    {exporting === 'docx' ? 'Se exporta...' : 'Descarca DOCX'}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+
+            {/* Report content — if any extracted data exists */}
+            {hasReportContent && (
               <>
-                {(meeting.data_desfasurare || meeting.format_intalnire || meeting.loc_desfasurare) && (
-                  <ReportSection title="Detalii eveniment" icon={<Calendar size={15} color={COLORS.navy} />}>
-                    <FieldRow label="Data desfasurare" value={meeting.data_desfasurare} />
-                    <FieldRow label="Format intalnire" value={meeting.format_intalnire} />
-                    <FieldRow label="Loc desfasurare" value={meeting.loc_desfasurare} />
-                    <FieldRow label="Mod promovare" value={meeting.mod_promovare} />
-                    <FieldRow label="Numar participanti" value={meeting.numar_participanti} />
-                  </ReportSection>
-                )}
-
-                {(meeting.obiectiv || meeting.tematica) && (
-                  <ReportSection title="Obiectiv si tematica" icon={<FileText size={15} color={COLORS.navy} />}>
-                    <FieldRow label="Obiectiv" value={meeting.obiectiv} />
-                    <FieldRow label="Tematica" value={meeting.tematica} />
-                  </ReportSection>
-                )}
-
-                {meeting.scurta_descriere && (
-                  <ReportSection title="Descriere" icon={<FileText size={15} color={COLORS.navy} />}>
-                    <Text style={s.bodyText}>{meeting.scurta_descriere}</Text>
-                  </ReportSection>
-                )}
-
-                {meeting.concluzia && (
-                  <ReportSection title="Concluzii" icon={<CheckCircle2 size={15} color={COLORS.navy} />}>
-                    <Text style={s.bodyText}>{meeting.concluzia}</Text>
-                  </ReportSection>
-                )}
+                {/* Structured fields from AI extraction */}
+                {Object.entries(meeting.vertical_config || {}).map(([key, val]) => {
+                  if (!val || (Array.isArray(val) && val.length === 0)) return null;
+                  const label = key.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
+                  return (
+                    <ReportSection key={key} title={label} icon={<FileText size={15} color={COLORS.navy} />}>
+                      {Array.isArray(val) ? (
+                        val.map((item: any, i: number) => (
+                          <View key={i} style={s.listItem}>
+                            <View style={s.bullet} />
+                            <Text style={s.listText}>{typeof item === 'object' ? JSON.stringify(item) : String(item)}</Text>
+                          </View>
+                        ))
+                      ) : (
+                        <Text style={s.bodyText}>{String(val)}</Text>
+                      )}
+                    </ReportSection>
+                  );
+                })}
               </>
-            ) : (
-              /* Other verticals — dynamic fields */
-              <ReportSection title="Continut raport" icon={<FileText size={15} color={COLORS.navy} />}>
-                {Object.entries(meeting.vertical_config || {}).map(([key, val]) => (
-                  <FieldRow
-                    key={key}
-                    label={key.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
-                    value={val}
-                  />
-                ))}
-              </ReportSection>
             )}
           </View>
         )}
@@ -582,43 +595,7 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
           </View>
         )}
 
-        {/* ── EXPORT BUTTONS ── */}
-        {isDone && (
-          <View style={s.exportContainer}>
-            <Text style={s.exportLabel}>Exporta raportul</Text>
-            <View style={s.exportRow}>
-              <Pressable
-                onPress={() => handleExport('pdf')}
-                disabled={exporting !== null}
-                style={[s.exportBtn, s.exportBtnPdf]}
-              >
-                {exporting === 'pdf' ? (
-                  <ActivityIndicator size={18} color="#FFFFFF" />
-                ) : (
-                  <Download size={18} color="#FFFFFF" />
-                )}
-                <Text style={s.exportBtnTextPdf}>
-                  {exporting === 'pdf' ? 'Se exporta...' : 'Descarca PDF'}
-                </Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => handleExport('docx')}
-                disabled={exporting !== null}
-                style={[s.exportBtn, s.exportBtnDocx]}
-              >
-                {exporting === 'docx' ? (
-                  <ActivityIndicator size={18} color={COLORS.navy} />
-                ) : (
-                  <FileText size={18} color={COLORS.navy} />
-                )}
-                <Text style={s.exportBtnTextDocx}>
-                  {exporting === 'docx' ? 'Se exporta...' : 'Descarca DOCX'}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        )}
+        {/* Export buttons are now inside the report card above */}
       </ScrollView>
     </View>
   );
@@ -885,18 +862,18 @@ const s = StyleSheet.create({
     marginTop: 2,
   },
 
-  // Export
-  exportContainer: {
-    paddingHorizontal: 16,
-    marginTop: 20,
+  // Export inside card
+  exportInCard: {
+    padding: 20,
+    paddingBottom: 16,
   },
-  exportLabel: {
+  exportInCardLabel: {
     color: '#9CA3AF',
     fontSize: 11,
     fontWeight: '600',
     letterSpacing: 0.5,
     textTransform: 'uppercase',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   exportRow: {
     flexDirection: 'row',
