@@ -17,13 +17,13 @@ export default function SlidePhone() {
         Animated.timing(orbScale, {
           toValue: 1.08,
           duration: 1400,
-          easing: Easing.inOut(Easing.sine),
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(orbScale, {
           toValue: 0.94,
           duration: 1600,
-          easing: Easing.inOut(Easing.sine),
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
       ])
