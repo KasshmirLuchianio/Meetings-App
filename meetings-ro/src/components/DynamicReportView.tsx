@@ -291,6 +291,12 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
     } catch { return ''; }
   };
 
+  // ── Check if report has content ─────────────────────────
+  const hasReportContent = verticalType === 'GAL'
+    ? !!(meeting.data_desfasurare || meeting.format_intalnire || meeting.loc_desfasurare ||
+         meeting.obiectiv || meeting.tematica || meeting.scurta_descriere || meeting.concluzia)
+    : !!(meeting.vertical_config && Object.keys(meeting.vertical_config).length > 0);
+
   // ── Diarized transcript ─────────────────────────────────
   const diarized: DiarizedEntry[] = meeting.diarized_transcript || [];
   const DIARIZED_PREVIEW_COUNT = 8;
@@ -394,7 +400,7 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
         )}
 
         {/* ── REPORT BODY ── */}
-        {isDone && (
+        {isDone && hasReportContent && (
           <View style={s.reportContainer}>
             {/* Decorative top line */}
             <View style={s.reportTopLine} />
