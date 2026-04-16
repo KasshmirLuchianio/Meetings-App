@@ -3,6 +3,24 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as Sentry from '@sentry/react-native';
+import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
+Sentry.init({
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
+  enableInExpoDevelopment: false,
+  debug: false,
+  tracesSampleRate: 0.2,
+});
 import NetInfo from '@react-native-community/netinfo';
 import {
   useFonts,
@@ -32,6 +50,7 @@ class ErrorBoundary extends React.Component<
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error('[ErrorBoundary]', error, info.componentStack);
+    Sentry.captureException(error, { extra: { componentStack: info.componentStack } });
   }
 
   render() {
@@ -57,6 +76,27 @@ class ErrorBoundary extends React.Component<
   }
 }
 
+async function registerForPushNotifications() {
+  try {
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    let finalStatus = existing;
+    if (existing !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    if (finalStatus !== 'granted') return;
+
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'default',
+        importance: Notifications.AndroidImportance.MAX,
+      });
+    }
+  } catch {
+    // Push notifications not available (e.g. simulator)
+  }
+}
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     PlayfairDisplay_700Bold,
@@ -71,6 +111,10 @@ export default function RootLayout() {
       setIsOffline(!state.isConnected);
     });
     return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    registerForPushNotifications();
   }, []);
 
   if (!fontsLoaded) {

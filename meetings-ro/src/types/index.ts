@@ -29,11 +29,10 @@ export interface User {
 
 export interface AuthTokens {
   access_token: string;
-  refresh_token: string;
   token_type: string;
 }
 
-export type MeetingStatus = 'pending' | 'uploading' | 'processing' | 'done' | 'error';
+export type MeetingStatus = 'pending' | 'uploading' | 'transcribing' | 'processing' | 'processed' | 'done' | 'failed' | 'error';
 
 export interface Meeting {
   _id: string;

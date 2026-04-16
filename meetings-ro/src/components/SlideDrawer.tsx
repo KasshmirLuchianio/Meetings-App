@@ -1,12 +1,15 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, Pressable, Animated, Dimensions, StyleSheet } from 'react-native';
+import { View, Text, Pressable, Animated, Dimensions, StyleSheet, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { Home, FolderOpen, Calendar, Settings, X, Crown, LogOut, CreditCard } from 'lucide-react-native';
+import * as SecureStore from 'expo-secure-store';
+import { Home, FolderOpen, Calendar, Settings, X, Crown, LogOut, CreditCard, Trash2 } from 'lucide-react-native';
 import { COLORS } from '../constants/theme';
+import { API_BASE_URL } from '../constants/config';
 import { useDrawer } from '../context/DrawerContext';
 import { useAuth } from '../context/AuthContext';
+import { authenticatedFetch } from '../utils/authenticatedFetch';
 
 const DRAWER_WIDTH = 280;
 
@@ -64,6 +67,36 @@ export default function SlideDrawer() {
     closeDrawer();
     await logout();
     setTimeout(() => router.replace('/welcome'), 150);
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Șterge contul',
+      'Această acțiune este ireversibilă. Toate înregistrările și rapoartele tale vor fi șterse definitiv.',
+      [
+        { text: 'Anulează', style: 'cancel' },
+        {
+          text: 'Șterge definitiv',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const res = await authenticatedFetch(`${API_BASE_URL}/api/auth/delete-account`, {
+                method: 'DELETE',
+              });
+              if (!res.ok) {
+                throw new Error('Eroare la ștergere');
+              }
+              await SecureStore.deleteItemAsync('auth_token');
+              closeDrawer();
+              await logout();
+              setTimeout(() => router.replace('/welcome'), 150);
+            } catch {
+              Alert.alert('Eroare', 'Nu am putut șterge contul. Încearcă din nou.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   if (!isAuthenticated) return null;
@@ -145,9 +178,15 @@ export default function SlideDrawer() {
           </Pressable>
         </View>
 
+        {/* Delete Account */}
+        <Pressable onPress={handleDeleteAccount} style={styles.deleteButton}>
+          <Trash2 size={16} color="#DC2626" />
+          <Text style={styles.deleteButtonText}>Șterge contul</Text>
+        </Pressable>
+
         {/* Footer */}
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Meetings.ro v2.0</Text>
+          <Text style={styles.footerText}>Meetings.ro v{require('../../package.json').version}</Text>
           <Text style={styles.footerText}>Enterprise Platform</Text>
         </View>
       </Animated.View>
@@ -250,6 +289,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#E5E7EB',
     marginVertical: 8,
     marginHorizontal: 16,
+  },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(220,38,38,0.15)',
+  },
+  deleteButtonText: {
+    color: '#DC2626',
+    fontSize: 13,
+    fontWeight: '500',
   },
   footer: {
     padding: 16,

@@ -8,6 +8,7 @@ import { COLORS } from '../src/constants/theme';
 import { PRICING_PLANS, API_BASE_URL } from '../src/constants/config';
 import { useAuth } from '../src/context/AuthContext';
 import { PricingTier } from '../src/types';
+import { authenticatedFetch } from '../src/utils/authenticatedFetch';
 
 export default function PricingScreen() {
   const router = useRouter();
@@ -41,7 +42,7 @@ export default function PricingScreen() {
     setLoadingTier(tier);
     try {
       const planKey = tier === 'PRO' ? 'pro' : 'enterprise';
-      const res = await fetch(`${API_BASE_URL}/api/payments/create-checkout-session`, {
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/payments/create-checkout-session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

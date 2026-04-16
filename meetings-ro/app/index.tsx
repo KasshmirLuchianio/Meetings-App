@@ -11,6 +11,7 @@ import { Mic, Upload, ChevronRight, Crown, AlertTriangle } from 'lucide-react-na
 import { COLORS } from '../src/constants/theme';
 import { API_BASE_URL, PRICING_PLANS } from '../src/constants/config';
 import { useAuth } from '../src/context/AuthContext';
+import { authenticatedFetch } from '../src/utils/authenticatedFetch';
 
 const STORAGE_KEY = 'selected_vertical';
 
@@ -37,9 +38,7 @@ export default function HomeScreen() {
   const loadUsageData = async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/users/me/usage`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/users/me/usage`);
       if (res.ok) {
         const data = await res.json();
         setUsageData({
@@ -95,17 +94,16 @@ export default function HomeScreen() {
 
   const handleRecordingComplete = async (uri: string, duration: number) => {
     try {
-      const createRes = await fetch(`${API_BASE_URL}/api/meetings`, {
+      const createRes = await authenticatedFetch(`${API_BASE_URL}/api/meetings`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ vertical_type: verticalType }),
       });
       if (createRes.status === 402) {
-        const err = await createRes.json().catch(() => ({ detail: '' }));
-        setLimitMessage(err.detail || 'Ai atins limita planului tău.');
+        const err = await createRes.json().catch(() => ({ limit: 0, plan: 'free' }));
+        setLimitMessage(
+          `Ai folosit toate cele ${err.limit} înregistrări din planul ${(err.plan || 'FREE').toUpperCase()}. Upgradează pentru a continua.`
+        );
         setShowLimitModal(true);
         return;
       }
@@ -122,9 +120,8 @@ export default function HomeScreen() {
         name: `recording_${Date.now()}.m4a`,
       } as any);
 
-      const uploadRes = await fetch(`${API_BASE_URL}/api/meetings/${meeting._id}/upload`, {
+      const uploadRes = await authenticatedFetch(`${API_BASE_URL}/api/meetings/${meeting._id}/upload`, {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
       if (!uploadRes.ok) {
@@ -267,7 +264,6 @@ export default function HomeScreen() {
             <AudioUploader
               onUploadComplete={handleUploadComplete}
               verticalType={verticalType}
-              authToken={token}
               onLimitReached={(msg) => {
                 setLimitMessage(msg);
                 setShowLimitModal(true);

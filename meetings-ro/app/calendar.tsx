@@ -14,6 +14,7 @@ import { Calendar } from 'react-native-calendars';
 import TopBar from '../src/components/TopBar';
 import { API_BASE_URL } from '../src/constants/config';
 import { COLORS } from '../src/constants/theme';
+import { authenticatedFetch } from '../src/utils/authenticatedFetch';
 
 interface Meeting {
   _id: string;
@@ -33,17 +34,21 @@ interface MarkedDates {
 }
 
 const VERTICAL_COLORS: Record<string, string> = {
-  GAL: '#2563EB',
-  Journalism: '#DC2626',
-  Legal: '#059669',
-  Banking: '#7C3AED',
+  GAL: '#1B2A4A',
+  JOURNALISM: '#B8962E',
+  LEGAL: '#8B4513',
+  BANKING: '#2C5F2D',
+  HEALTHCARE: '#DC2626',
+  STARTUPS: '#7C3AED',
 };
 
 const VERTICAL_LABELS: Record<string, string> = {
   GAL: 'GAL',
-  Journalism: 'Jurnalism',
-  Legal: 'Juridic',
-  Banking: 'Bancar',
+  JOURNALISM: 'Jurnalism',
+  LEGAL: 'Legal',
+  BANKING: 'Banking',
+  HEALTHCARE: 'Sănătate',
+  STARTUPS: 'Startups',
 };
 
 export default function CalendarScreen() {
@@ -81,7 +86,7 @@ export default function CalendarScreen() {
     }
 
     try {
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${API_BASE_URL}/api/meetings/calendar-dates?year=${year}&month=${month}`
       );
       if (!response.ok) throw new Error('Failed to fetch calendar dates');
@@ -98,7 +103,7 @@ export default function CalendarScreen() {
       });
 
       setMarkedDates(marked);
-      
+
       // Update cache
       setMonthCache((prev) => ({
         ...prev,
@@ -116,7 +121,7 @@ export default function CalendarScreen() {
     }
 
     try {
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${API_BASE_URL}/api/meetings/calendar-dates?year=${year}&month=${month}`
       );
       if (!response.ok) return;
@@ -145,7 +150,7 @@ export default function CalendarScreen() {
   const fetchDayMeetings = async (date: string) => {
     setLoading(true);
     try {
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${API_BASE_URL}/api/meetings/calendar-by-date?date=${date}`
       );
       if (!response.ok) throw new Error('Failed to fetch day meetings');

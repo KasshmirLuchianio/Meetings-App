@@ -228,14 +228,19 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: 'rgba(250,248,243,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.2)',
   },
   dotActive: {
     width: 28,
-    backgroundColor: '#B8962E',
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.85)',
   },
   dotDone: {
-    backgroundColor: 'rgba(184,150,46,0.4)',
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.4)',
   },
   primaryButton: {
     width: '100%',

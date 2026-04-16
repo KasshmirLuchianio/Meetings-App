@@ -1,10 +1,13 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ActivityIndicator, Alert } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
+import * as SecureStore from 'expo-secure-store';
+import { useRouter } from 'expo-router';
 import { Upload, FileAudio, X } from 'lucide-react-native';
 import { COLORS } from '../constants/theme';
 import { API_BASE_URL, UPLOAD_CONFIG } from '../constants/config';
+import { authenticatedFetch } from '../utils/authenticatedFetch';
 
 interface UploadProgress {
   totalBytesSent: number;
@@ -15,11 +18,25 @@ interface UploadProgress {
 interface AudioUploaderProps {
   onUploadComplete: (meetingId: string) => void;
   verticalType?: string;
-  authToken?: string | null;
   onLimitReached?: (message: string) => void;
 }
 
-export default function AudioUploader({ onUploadComplete, verticalType = 'GAL', authToken, onLimitReached }: AudioUploaderProps) {
+const getMimeType = (filename: string): string => {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  const map: Record<string, string> = {
+    m4a: 'audio/m4a',
+    mp3: 'audio/mpeg',
+    wav: 'audio/wav',
+    webm: 'audio/webm',
+    ogg: 'audio/ogg',
+    aac: 'audio/aac',
+    flac: 'audio/flac',
+  };
+  return map[ext || ''] || 'audio/mpeg';
+};
+
+export default function AudioUploader({ onUploadComplete, verticalType = 'GAL', onLimitReached }: AudioUploaderProps) {
+  const router = useRouter();
   const [selectedFile, setSelectedFile] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<UploadProgress>({
@@ -62,7 +79,9 @@ export default function AudioUploader({ onUploadComplete, verticalType = 'GAL', 
     meetingId: string,
     attempt: number = 0
   ): Promise<void> => {
-    return new Promise((resolve, reject) => {
+    const token = await SecureStore.getItemAsync('auth_token');
+
+    return new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
 
       // Progress tracking
@@ -95,13 +114,16 @@ export default function AudioUploader({ onUploadComplete, verticalType = 'GAL', 
       const formData = new FormData();
       formData.append('file', {
         uri,
-        type: 'audio/m4a',
+        type: getMimeType(selectedFile.name),
         name: selectedFile.name || `audio_${Date.now()}.m4a`,
       } as any);
 
-      // Send request
+      // Send request with auth
       xhr.open('POST', `${API_BASE_URL}/api/meetings/${meetingId}/upload`);
       xhr.setRequestHeader('Accept', 'application/json');
+      if (token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      }
       xhr.send(formData);
     }).catch(async (error) => {
       if (attempt < UPLOAD_CONFIG.maxRetries - 1) {
@@ -123,21 +145,25 @@ export default function AudioUploader({ onUploadComplete, verticalType = 'GAL', 
 
     try {
       // Step 1: Create meeting placeholder
-      const createResponse = await fetch(`${API_BASE_URL}/api/meetings`, {
+      const createResponse = await authenticatedFetch(`${API_BASE_URL}/api/meetings`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ vertical_type: verticalType }),
       });
 
       if (createResponse.status === 402) {
-        const err = await createResponse.json().catch(() => ({ detail: '' }));
+        const err = await createResponse.json().catch(() => ({ limit: 0, plan: 'free' }));
         if (onLimitReached) {
-          onLimitReached(err.detail || 'Ai atins limita planului tău.');
+          onLimitReached(err.detail || `Ai folosit toate cele ${err.limit} înregistrări din planul ${(err.plan || 'FREE').toUpperCase()}.`);
         } else {
-          alert(err.detail || 'Ai atins limita planului tău.');
+          Alert.alert(
+            'Limită atinsă',
+            `Ai folosit toate cele ${err.limit} înregistrări din planul ${(err.plan || 'FREE').toUpperCase()}. Upgradează pentru a continua.`,
+            [
+              { text: 'Mai târziu', style: 'cancel' },
+              { text: 'Vezi planuri', onPress: () => router.push('/pricing') },
+            ]
+          );
         }
         setUploading(false);
         return;

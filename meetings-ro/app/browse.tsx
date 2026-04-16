@@ -15,6 +15,7 @@ import TopBar from '../src/components/TopBar';
 import { API_BASE_URL } from '../src/constants/config';
 import { COLORS } from '../src/constants/theme';
 import { useAuth } from '../src/context/AuthContext';
+import { authenticatedFetch } from '../src/utils/authenticatedFetch';
 
 interface Meeting {
   _id: string;
@@ -103,9 +104,7 @@ export default function BrowseScreen() {
         setLoadingMore(true);
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/meetings?page=${page}&limit=50`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/meetings?page=${page}&limit=50`);
       if (!response.ok) throw new Error('Failed to fetch meetings');
       
       const data = await response.json();

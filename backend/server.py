@@ -31,7 +31,7 @@ from anthropic import AsyncAnthropic
 load_dotenv()
 
 # ==================== CONFIG ====================
-MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb://meetingsadmin:changeme_in_production@localhost:27017/gal_meetings?authSource=admin")
 DB_NAME = os.environ.get("DB_NAME", "gal_meetings")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
@@ -658,6 +658,64 @@ async def resend_verification(req: ResendVerificationRequest):
     return {"message": "Email de confirmare retrimis. Verifică inbox-ul."}
 
 
+# ==================== DELETE ACCOUNT ====================
+
+@app.delete("/api/auth/delete-account")
+async def delete_account(current_user: dict = Depends(get_current_user)):
+    """Delete user account and all associated data. Required by Apple App Store."""
+    import shutil
+    user_id = str(current_user["_id"])
+
+    # Delete all user's meetings
+    await meetings_col.delete_many({"user_id": user_id})
+
+    # Delete user record
+    await users_col.delete_one({"_id": current_user["_id"]})
+
+    # Delete uploaded audio files
+    user_uploads_path = UPLOAD_DIR / user_id
+    if user_uploads_path.exists():
+        shutil.rmtree(str(user_uploads_path), ignore_errors=True)
+
+    return {"message": "Contul și toate datele asociate au fost șterse definitiv."}
+
+
+# ==================== PUSH NOTIFICATIONS ====================
+
+class PushTokenRequest(BaseModel):
+    token: str
+
+@app.post("/api/users/push-token")
+async def save_push_token(req: PushTokenRequest, current_user: dict = Depends(get_current_user)):
+    """Save Expo push token for the current user."""
+    await users_col.update_one(
+        {"_id": current_user["_id"]},
+        {"$set": {"push_token": req.token}}
+    )
+    return {"ok": True}
+
+
+async def notify_user_meeting_done(user_id: str, meeting_title: str):
+    """Send push notification when meeting processing is complete."""
+    try:
+        user = await users_col.find_one({"_id": ObjectId(user_id)})
+        if not user:
+            return
+        push_token = user.get("push_token")
+        if not push_token:
+            return
+        import httpx
+        async with httpx.AsyncClient() as client:
+            await client.post("https://exp.host/--/api/v2/push/send", json={
+                "to": push_token,
+                "title": "Raport gata",
+                "body": f"{meeting_title or 'Întâlnirea ta'} a fost procesată.",
+                "sound": "default",
+            })
+    except Exception as e:
+        print(f"[Push] Failed to send notification: {e}")
+
+
 # ==================== USAGE ENDPOINT ====================
 @app.get("/api/users/me/usage")
 async def get_user_usage(user: dict = Depends(get_current_user)):
@@ -747,6 +805,71 @@ async def transcribe_audio(file_path: str) -> dict:
     return {"text": transcript_text, "segments": segments}
 
 
+async def diarize_transcript(segments: list) -> list:
+    """Use Claude to identify speakers from transcript segments with timestamps."""
+    if not segments or not anthropic_client:
+        return []
+
+    # Build a text block from segments with timestamps
+    segments_text = ""
+    for seg in segments:
+        start = seg.get("start", 0)
+        text = seg.get("text", "").strip()
+        if text:
+            minutes = int(start // 60)
+            seconds = int(start % 60)
+            segments_text += f"[{minutes:02d}:{seconds:02d}] {text}\n"
+
+    if not segments_text.strip():
+        return []
+
+    try:
+        response = await anthropic_client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=4000,
+            system=(
+                "Ești un expert în analiza conversațiilor. Primești o transcriere cu timestamps dintr-o ședință cu mai mulți participanți.\n\n"
+                "SARCINA TA: Identifică schimbările de vorbitor și etichetează fiecare replică.\n\n"
+                "REGULI:\n"
+                "- Analizează contextul, pauzele, schimbările de subiect și formulările pentru a detecta când vorbește altcineva\n"
+                "- Etichetează vorbitorii ca: Vorbitor 1, Vorbitor 2, Vorbitor 3 etc.\n"
+                "- Dacă un vorbitor se prezintă cu numele (ex: 'Eu sunt Ion Popescu'), folosește numele real de atunci încolo\n"
+                "- Dacă menționează funcția (ex: 'ca primar' sau 'în calitate de secretar'), adaugă funcția\n"
+                "- Grupează segmentele consecutive ale aceluiași vorbitor într-o singură replică\n"
+                "- Păstrează timestamps-ul de start al primului segment din grup\n\n"
+                "RĂSPUNDE STRICT ÎN FORMAT JSON — un array de obiecte:\n"
+                '[{"speaker": "Vorbitor 1", "role": null, "timestamp": "00:00", "text": "..."}]\n\n'
+                "Dacă un vorbitor are nume identificat, speaker devine numele. Dacă are funcție, role devine funcția.\n"
+                "NU adăuga text inventat. NU modifica cuvintele din transcriere. Doar etichetează și grupează."
+            ),
+            messages=[{
+                "role": "user",
+                "content": f"Identifică vorbitorii din această transcriere de ședință:\n\n{segments_text}"
+            }]
+        )
+
+        response_text = response.content[0].text.strip()
+
+        # Parse JSON
+        try:
+            result = json.loads(response_text)
+        except json.JSONDecodeError:
+            json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group(0))
+            else:
+                print(f"[Diarize] Could not parse JSON from Claude response")
+                return []
+
+        if isinstance(result, list):
+            return result
+        return []
+
+    except Exception as e:
+        print(f"[Diarize] Error: {e}")
+        return []
+
+
 async def extract_meeting_data(transcript: str, vertical_type: str = "GAL") -> dict:
     """Extract structured data from transcript using Anthropic Claude SDK."""
     from verticals import get_vertical_config
@@ -808,11 +931,17 @@ async def process_meeting(meeting_id: str):
         print(f"[GAL] Transcribing meeting {meeting_id}...")
         transcription = await transcribe_audio(audio_path)
         
+        # Step 1b: Speaker diarization
+        print(f"[Meetings.ro] Diarizing speakers for meeting {meeting_id}...")
+        diarized = await diarize_transcript(transcription["segments"])
+        print(f"[Meetings.ro] Found {len(set(d.get('speaker','') for d in diarized))} speakers in {len(diarized)} segments")
+
         await meetings_col.update_one(
             {"_id": ObjectId(meeting_id)},
             {"$set": {
                 "transcript": transcription["text"],
                 "segments": transcription["segments"],
+                "diarized_transcript": diarized,
                 "updated_at": datetime.now(timezone.utc)
             }}
         )
@@ -863,7 +992,12 @@ async def process_meeting(meeting_id: str):
             )
         
         print(f"[GAL] Meeting {meeting_id} processed successfully!")
-        
+
+        # Send push notification to user
+        meeting_doc = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
+        if meeting_doc and meeting_doc.get("user_id"):
+            await notify_user_meeting_done(meeting_doc["user_id"], title)
+
     except Exception as e:
         print(f"[GAL] Error processing meeting {meeting_id}: {e}")
         import traceback
@@ -882,9 +1016,24 @@ async def process_meeting(meeting_id: str):
 
 @app.get("/api/v1/verticals")
 async def get_verticals():
-    """Get all available vertical configurations."""
-    from verticals import list_verticals
-    return {"verticals": list_verticals()}
+    """Get all available vertical configurations with output fields."""
+    from verticals import VERTICALS
+    result = []
+    for key, config in VERTICALS.items():
+        result.append({
+            "id": key,
+            "name": config.name,
+            "display_name_ro": config.display_name_ro,
+            "icon": config.icon,
+            "color_accent": config.color_accent,
+            "description_ro": config.description_ro,
+            "output_fields": [
+                {"key": f.key, "label_ro": f.label_ro, "field_type": f.field_type}
+                for f in config.output_fields
+            ],
+            "predefined_locations": config.predefined_locations or [],
+        })
+    return {"verticals": result}
 
 
 @app.get("/download/meetings-ro.zip")
@@ -1788,12 +1937,17 @@ async def stripe_webhook(request: Request):
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
 
+    if not STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(status_code=500, detail="Webhook secret not configured")
+
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid payload")
     except stripe.error.SignatureVerificationError:
         raise HTTPException(status_code=400, detail="Invalid signature")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Webhook error: {str(e)}")
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
