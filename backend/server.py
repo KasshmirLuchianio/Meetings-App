@@ -31,7 +31,7 @@ from anthropic import AsyncAnthropic
 load_dotenv()
 
 # ==================== CONFIG ====================
-MONGO_URL = os.environ.get("MONGO_URL", "mongodb://meetingsadmin:changeme_in_production@localhost:27017/gal_meetings?authSource=admin")
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017/gal_meetings")
 DB_NAME = os.environ.get("DB_NAME", "gal_meetings")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
