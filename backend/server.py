@@ -152,16 +152,70 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 
 
 async def verify_meeting_ownership(meeting_id: str, user: dict) -> dict:
-    """Fetch meeting and verify it belongs to the user. Returns meeting doc."""
+    """Fetch meeting and verify access (owner, same tenant, or admin). Returns meeting doc."""
     try:
         meeting = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
     except Exception:
         raise HTTPException(status_code=400, detail="ID meeting invalid")
     if not meeting:
         raise HTTPException(status_code=404, detail="Ședința nu a fost găsită")
-    if meeting.get("user_id") and meeting["user_id"] != str(user["_id"]):
-        raise HTTPException(status_code=403, detail="Nu ai acces la această ședință")
-    return meeting
+
+    # Admin role bypasses ownership checks
+    user_role = user.get("role", "member")
+    if user_role == "admin":
+        return meeting
+
+    user_id = str(user["_id"])
+    user_tenant = str(user["tenant_id"]) if user.get("tenant_id") else None
+    meeting_user = meeting.get("user_id")
+    meeting_tenant = meeting.get("tenant_id")
+
+    # Owner match
+    if meeting_user and meeting_user == user_id:
+        return meeting
+
+    # Same tenant match (for enterprise multi-user scenarios)
+    if user_tenant and meeting_tenant and user_tenant == meeting_tenant:
+        return meeting
+
+    raise HTTPException(status_code=403, detail="Nu ai acces la această ședință")
+
+
+def build_meetings_scope_query(user: dict) -> dict:
+    """Build a MongoDB query that scopes meetings to what the user can see.
+    - admin: sees all
+    - enterprise members (with tenant_id): see tenant-wide meetings
+    - regular users: see only their own meetings
+    """
+    user_role = user.get("role", "member")
+    if user_role == "admin":
+        return {}
+
+    user_id = str(user["_id"])
+    user_tenant = str(user["tenant_id"]) if user.get("tenant_id") else None
+
+    if user_tenant:
+        # Enterprise user — see own meetings OR any meeting in same tenant
+        return {"$or": [
+            {"user_id": user_id},
+            {"tenant_id": user_tenant},
+        ]}
+
+    # Solo user — own meetings only
+    return {"user_id": user_id}
+
+
+def require_role(*allowed_roles: str):
+    """Dependency factory: require user to have one of the given roles (or be admin)."""
+    async def checker(user: dict = Depends(get_current_user)) -> dict:
+        role = user.get("role", "member")
+        if role == "admin" or role in allowed_roles:
+            return user
+        raise HTTPException(
+            status_code=403,
+            detail=f"Acțiune restricționată. Necesită unul din rolurile: {', '.join(allowed_roles)}"
+        )
+    return checker
 
 
 # ==================== PLAN LIMIT HELPERS ====================
@@ -346,6 +400,8 @@ async def auth_register(request: Request, req: RegisterRequest):
         "password_hash": hash_password(req.password),
         "company": req.company,
         "plan": "FREE",
+        "role": "member",
+        "tenant_id": None,
         "is_verified": True,
         "meetings_used_this_month": 0,
         "last_monthly_reset": now,
@@ -365,6 +421,8 @@ async def auth_register(request: Request, req: RegisterRequest):
             "email": req.email,
             "company": req.company,
             "plan": "FREE",
+            "role": "member",
+            "tenant_id": None,
             "meetings_used_this_month": 0,
             "created_at": now.isoformat(),
         }
@@ -400,6 +458,8 @@ async def auth_login(request: Request, req: LoginRequest):
             "email": user["email"],
             "company": user.get("company"),
             "plan": user.get("plan", "FREE"),
+            "role": user.get("role", "member"),
+            "tenant_id": str(user["tenant_id"]) if user.get("tenant_id") else None,
             "meetings_used_this_month": user.get("meetings_used_this_month", 0),
             "created_at": user["created_at"].isoformat() if isinstance(user.get("created_at"), datetime) else str(user.get("created_at", "")),
         }
@@ -1064,8 +1124,8 @@ async def create_meeting(data: MeetingCreate = None, user: dict = Depends(get_cu
 
     now = datetime.now(timezone.utc)
 
-    # Get vertical_type from request or default to GAL
-    vertical_type = data.vertical_type if data and hasattr(data, 'vertical_type') else "GAL"
+    # Get vertical_type from request or default to GENERAL (universal)
+    vertical_type = data.vertical_type if data and hasattr(data, 'vertical_type') and data.vertical_type else "GENERAL"
 
     meeting = {
         "title": (data.title if data and data.title else None),
@@ -1088,7 +1148,9 @@ async def create_meeting(data: MeetingCreate = None, user: dict = Depends(get_cu
         # Vertical system
         "vertical_type": vertical_type,
         "vertical_config": {},
+        # Ownership + multi-tenant
         "user_id": str(user["_id"]),
+        "tenant_id": str(user["tenant_id"]) if user.get("tenant_id") else None,
         "status": "pending",
         "error": None,
         "duration": 0,
@@ -1108,15 +1170,25 @@ ALLOWED_AUDIO_TYPES = {
     "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav",
     "audio/m4a", "audio/x-m4a", "audio/mp4", "audio/ogg",
     "audio/webm", "audio/aac", "audio/x-m4a", "audio/3gpp",
+    "audio/x-aac", "audio/flac", "audio/x-flac",
+    "application/octet-stream",  # iOS often sends this for m4a
+    "video/mp4",  # some devices send m4a as video/mp4
 }
+ALLOWED_AUDIO_EXTENSIONS = {".m4a", ".mp3", ".wav", ".ogg", ".webm", ".aac", ".flac", ".3gp", ".mp4"}
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 
 @app.post("/api/meetings/{meeting_id}/upload")
 async def upload_audio(meeting_id: str, background_tasks: BackgroundTasks, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     """Upload audio file for a meeting and start processing."""
-    # Validate MIME type
-    if file.content_type and file.content_type not in ALLOWED_AUDIO_TYPES:
-        raise HTTPException(status_code=415, detail="Format audio neacceptat")
+    # Validate MIME type — allow unknown types if extension is valid
+    file_ext = Path(file.filename or "").suffix.lower() if file.filename else ""
+    content_type = (file.content_type or "").lower().strip()
+
+    if content_type and content_type not in ALLOWED_AUDIO_TYPES:
+        # MIME unknown, check extension as fallback
+        if file_ext not in ALLOWED_AUDIO_EXTENSIONS:
+            print(f"[Upload] Rejected: content_type={content_type}, ext={file_ext}, filename={file.filename}")
+            raise HTTPException(status_code=415, detail=f"Format audio neacceptat: {content_type}")
 
     # Validate meeting exists + ownership
     meeting = await verify_meeting_ownership(meeting_id, user)
@@ -1250,8 +1322,8 @@ async def list_meetings(
     limit: int = Query(50, ge=1, le=100),
     user: dict = Depends(get_current_user),
 ):
-    """List meetings with optional filters (scoped to current user)."""
-    query = {"user_id": str(user["_id"])}
+    """List meetings with optional filters (scoped to current user / tenant)."""
+    query = build_meetings_scope_query(user)
 
     if locality:
         query["locality"] = locality
@@ -1292,11 +1364,10 @@ async def get_meeting_dates(
     _, last_day = monthrange(year, month)
     end_date = datetime(year, month, last_day, 23, 59, 59, tzinfo=timezone.utc)
 
+    scope = build_meetings_scope_query(user)
+    match_stage = {**scope, "created_at": {"$gte": start_date, "$lte": end_date}}
     pipeline = [
-        {"$match": {
-            "user_id": str(user["_id"]),
-            "created_at": {"$gte": start_date, "$lte": end_date}
-        }},
+        {"$match": match_stage},
         {"$group": {
             "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}},
             "count": {"$sum": 1}
@@ -1326,7 +1397,7 @@ async def get_meetings_by_date(
     next_date = target_date.replace(hour=23, minute=59, second=59)
 
     query = {
-        "user_id": str(user["_id"]),
+        **build_meetings_scope_query(user),
         "created_at": {"$gte": target_date, "$lte": next_date}
     }
     
@@ -1856,8 +1927,239 @@ async def export_docx(meeting_id: str, user: dict = Depends(get_current_user)):
     buffer.seek(0)
     
     safe_title = re.sub(r'[^\w\s-]', '', transliterate_ro(title)).strip().replace(' ', '_')[:50]
-    filename = f"GAL_{safe_title}.docx"
-    
+    filename = f"Sedinta_{safe_title}.docx"
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+# ==================== PROCES VERBAL (Enterprise / Public Institutions) ====================
+
+@app.get("/api/meetings/{meeting_id}/export/proces-verbal")
+async def export_proces_verbal(meeting_id: str, user: dict = Depends(get_current_user)):
+    """Export meeting as formal Proces Verbal (minutes) DOCX — institutional format.
+
+    Used by mayors, secretaries, councilors and clerks in public institutions.
+    Produces a formally structured document with:
+      - Header (institution, date, participants, quorum)
+      - Agenda (ordinea de zi)
+      - Dezbateri (per speaker, from diarized transcript)
+      - Hotărâri / Decizii adoptate
+      - Semnături
+    """
+    meeting = await verify_meeting_ownership(meeting_id, user)
+
+    from docx import Document
+    from docx.shared import Pt, Inches, RGBColor, Cm
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    doc = Document()
+
+    # Page margins
+    for section in doc.sections:
+        section.top_margin = Cm(2.0)
+        section.bottom_margin = Cm(2.0)
+        section.left_margin = Cm(2.5)
+        section.right_margin = Cm(2.5)
+
+    # Base style
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Times New Roman'
+    font.size = Pt(12)
+
+    # ---- ANTET (Header) ----
+    institution = meeting.get("locality") or user.get("company") or "Instituție"
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(institution.upper())
+    run.bold = True
+    run.font.size = Pt(14)
+
+    # Titlu
+    title_text = meeting.get("title") or "Ședință"
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("\nPROCES-VERBAL")
+    run.bold = True
+    run.font.size = Pt(16)
+
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run(f"al ședinței „{title_text}”").italic = True
+
+    doc.add_paragraph()  # spacer
+
+    # ---- DATA / LOC ----
+    date_str = meeting.get("date") or meeting.get("data_desfasurare") or ""
+    if date_str:
+        try:
+            dt = datetime.fromisoformat(str(date_str).replace("Z", "+00:00"))
+            date_fmt = dt.strftime("%d.%m.%Y, ora %H:%M")
+        except (ValueError, AttributeError):
+            date_fmt = str(date_str)
+    else:
+        date_fmt = "—"
+
+    p = doc.add_paragraph()
+    p.add_run("Data și ora desfășurării: ").bold = True
+    p.add_run(date_fmt)
+
+    loc = meeting.get("loc_desfasurare") or meeting.get("locality") or "—"
+    p = doc.add_paragraph()
+    p.add_run("Locul desfășurării: ").bold = True
+    p.add_run(str(loc))
+
+    # Participanți
+    vc = meeting.get("vertical_config") or {}
+    participants = (
+        vc.get("participanti")
+        or vc.get("participants")
+        or meeting.get("participanti")
+        or []
+    )
+    if participants:
+        doc.add_paragraph()
+        p = doc.add_paragraph()
+        p.add_run("Participanți: ").bold = True
+        if isinstance(participants, list):
+            for item in participants:
+                doc.add_paragraph(f"• {item}")
+        else:
+            p.add_run(str(participants))
+
+    # ---- ORDINEA DE ZI ----
+    agenda = (
+        vc.get("ordine_de_zi")
+        or vc.get("subiecte_discutate")
+        or vc.get("agenda")
+        or []
+    )
+    if agenda:
+        doc.add_paragraph()
+        h = doc.add_heading("ORDINEA DE ZI", level=2)
+        if isinstance(agenda, list):
+            for i, item in enumerate(agenda, 1):
+                doc.add_paragraph(f"{i}. {item}")
+        else:
+            doc.add_paragraph(str(agenda))
+
+    # ---- DEZBATERI (from diarized transcript) ----
+    diarized = meeting.get("diarized_transcript") or []
+    if diarized:
+        doc.add_paragraph()
+        doc.add_heading("DEZBATERI", level=2)
+        for entry in diarized:
+            speaker = entry.get("speaker") or "Vorbitor"
+            role = entry.get("role") or ""
+            timestamp = entry.get("timestamp") or ""
+            text = entry.get("text") or ""
+            p = doc.add_paragraph()
+            label = f"{speaker}"
+            if role:
+                label += f" ({role})"
+            if timestamp:
+                label += f" — {timestamp}"
+            label += ":"
+            run = p.add_run(label)
+            run.bold = True
+            p.add_run(f" {text}")
+    else:
+        # Fallback: raw transcript
+        transcript = meeting.get("transcript", "")
+        if transcript:
+            doc.add_paragraph()
+            doc.add_heading("DEZBATERI", level=2)
+            doc.add_paragraph(transcript)
+
+    # ---- HOTĂRÂRI / DECIZII ----
+    decisions = (
+        vc.get("decizii")
+        or vc.get("hotarari")
+        or vc.get("decizii_luate")
+        or []
+    )
+    if decisions:
+        doc.add_paragraph()
+        doc.add_heading("HOTĂRÂRI ADOPTATE", level=2)
+        if isinstance(decisions, list):
+            for i, item in enumerate(decisions, 1):
+                doc.add_paragraph(f"{i}. {item}")
+        else:
+            doc.add_paragraph(str(decisions))
+
+    # ---- ACȚIUNI DE URMAT ----
+    actions = (
+        vc.get("actiuni_de_urmat")
+        or vc.get("actions")
+        or meeting.get("actions")
+        or []
+    )
+    if actions:
+        doc.add_paragraph()
+        doc.add_heading("ACȚIUNI STABILITE", level=2)
+        table = doc.add_table(rows=1, cols=3)
+        table.style = 'Table Grid'
+        hdr = table.rows[0].cells
+        hdr[0].text = 'Acțiune'
+        hdr[1].text = 'Responsabil'
+        hdr[2].text = 'Termen'
+        if isinstance(actions, list):
+            for a in actions:
+                row = table.add_row().cells
+                if isinstance(a, dict):
+                    row[0].text = str(a.get('text') or a.get('actiune') or '')
+                    row[1].text = str(a.get('owner') or a.get('responsabil') or '-')
+                    row[2].text = str(a.get('deadline') or a.get('termen') or '-')
+                else:
+                    row[0].text = str(a)
+                    row[1].text = '-'
+                    row[2].text = '-'
+
+    # ---- CONCLUZII ----
+    conclusions = vc.get("concluzii") or meeting.get("concluzia") or ""
+    if conclusions:
+        doc.add_paragraph()
+        doc.add_heading("CONCLUZII", level=2)
+        if isinstance(conclusions, list):
+            for c in conclusions:
+                doc.add_paragraph(str(c))
+        else:
+            doc.add_paragraph(str(conclusions))
+
+    # ---- SEMNĂTURI ----
+    doc.add_paragraph()
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.add_run("Drept pentru care am încheiat prezentul proces-verbal.").italic = True
+
+    doc.add_paragraph()
+    table = doc.add_table(rows=2, cols=2)
+    table.rows[0].cells[0].text = "Președinte de ședință"
+    table.rows[0].cells[1].text = "Secretar"
+    table.rows[1].cells[0].text = "\n\n_______________________"
+    table.rows[1].cells[1].text = "\n\n_______________________"
+
+    # Footer
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(f"Document generat automat cu Meetings.ro — {datetime.now(timezone.utc).strftime('%d.%m.%Y')}")
+    run.italic = True
+    run.font.size = Pt(9)
+    run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
+
+    # Output
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+
+    safe_title = re.sub(r'[^\w\s-]', '', transliterate_ro(title_text)).strip().replace(' ', '_')[:50]
+    filename = f"ProcesVerbal_{safe_title}.docx"
+
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",

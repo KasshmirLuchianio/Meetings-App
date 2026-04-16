@@ -9,7 +9,7 @@ import * as Sharing from 'expo-sharing';
 import * as SecureStore from 'expo-secure-store';
 import {
   RefreshCw, Download, FileText, Sparkles, Users,
-  MapPin, Calendar, Clock, ChevronDown, CheckCircle2, AlertTriangle,
+  MapPin, Calendar, Clock, ChevronDown, CheckCircle2, AlertTriangle, Scroll,
 } from 'lucide-react-native';
 import { API_BASE_URL } from '../constants/config';
 import { useAuth } from '../context/AuthContext';
@@ -115,7 +115,7 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
-  const [exporting, setExporting] = useState<'pdf' | 'docx' | null>(null);
+  const [exporting, setExporting] = useState<'pdf' | 'docx' | 'pv' | null>(null);
   const [isCorrecting, setIsCorrecting] = useState(false);
   const [transcriptExpanded, setTranscriptExpanded] = useState(false);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
@@ -170,7 +170,7 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
     loadMeetingData(false);
   };
 
-  const handleExport = async (format: 'pdf' | 'docx') => {
+  const handleExport = async (format: 'pdf' | 'docx' | 'pv') => {
     if (!meeting || !FINAL_STATUSES.slice(0, 2).includes(meeting.status)) {
       Alert.alert('Export indisponibil', 'Disponibil doar pentru intalniri finalizate.');
       return;
@@ -181,8 +181,12 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
       const isAvailable = await Sharing.isAvailableAsync();
       if (!isAvailable) { Alert.alert('Eroare', 'Sharing nu e disponibil.'); return; }
 
-      const url = `${API_BASE_URL}/api/meetings/${meetingId}/export/${format}`;
-      const fileUri = FileSystem.cacheDirectory + `meeting_${meetingId}.${format}`;
+      const endpoint = format === 'pv' ? 'export/proces-verbal' : `export/${format}`;
+      const fileExt = format === 'pv' ? 'docx' : format;
+      const filePrefix = format === 'pv' ? 'proces_verbal' : 'meeting';
+
+      const url = `${API_BASE_URL}/api/meetings/${meetingId}/${endpoint}`;
+      const fileUri = FileSystem.cacheDirectory + `${filePrefix}_${meetingId}.${fileExt}`;
       const authToken = await SecureStore.getItemAsync('auth_token');
       const dl = await FileSystem.downloadAsync(url, fileUri, {
         headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
@@ -192,7 +196,9 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
         mimeType: format === 'pdf'
           ? 'application/pdf'
           : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        dialogTitle: `${meeting.title || 'Raport'} — ${format.toUpperCase()}`,
+        dialogTitle: format === 'pv'
+          ? `Proces-Verbal — ${meeting.title || 'Sedinta'}`
+          : `${meeting.title || 'Raport'} — ${format.toUpperCase()}`,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {
@@ -421,6 +427,22 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
                   </Text>
                 </Pressable>
               </View>
+
+              {/* Proces Verbal — institutional format */}
+              <Pressable
+                onPress={() => handleExport('pv')}
+                disabled={exporting !== null}
+                style={s.procesVerbalBtn}
+              >
+                {exporting === 'pv' ? (
+                  <ActivityIndicator size={16} color={COLORS.gold} />
+                ) : (
+                  <Scroll size={16} color={COLORS.gold} />
+                )}
+                <Text style={s.procesVerbalText}>
+                  {exporting === 'pv' ? 'Se genereaza...' : 'Genereaza Proces-Verbal'}
+                </Text>
+              </Pressable>
             </View>
 
             {/* Report content — if any extracted data exists */}
@@ -890,6 +912,24 @@ const s = StyleSheet.create({
     color: COLORS.navy,
     fontSize: 14,
     fontWeight: '700',
+  },
+  procesVerbalBtn: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: COLORS.gold + '12',
+    borderWidth: 1,
+    borderColor: COLORS.gold + '40',
+  },
+  procesVerbalText: {
+    color: COLORS.gold,
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
 
   // Speaker diarization
