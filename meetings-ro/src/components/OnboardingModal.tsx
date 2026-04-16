@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useAuth } from '../context/AuthContext';
 import SlidePhone from './onboarding/SlidePhone';
 import SlideWaveform from './onboarding/SlideWaveform';
 import SlideMic from './onboarding/SlideMic';
@@ -44,6 +45,7 @@ const SLIDES = [
 ];
 
 export default function OnboardingModal({ onDone }: { onDone: () => void }) {
+  const { user } = useAuth();
   const [currentSlide, setCurrentSlide] = useState(0);
   const bgOpacity = useRef(new Animated.Value(0)).current;
   const contentFade = useRef(new Animated.Value(0)).current;
@@ -94,7 +96,8 @@ export default function OnboardingModal({ onDone }: { onDone: () => void }) {
       duration: 400,
       useNativeDriver: true,
     }).start(async () => {
-      await AsyncStorage.setItem('onboarding_completed', 'true');
+      const key = `onboarding_completed_${user?.email || user?._id || 'default'}`;
+      await AsyncStorage.setItem(key, 'true');
       onDone();
     });
   };

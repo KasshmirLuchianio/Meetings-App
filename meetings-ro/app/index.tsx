@@ -46,11 +46,13 @@ export default function HomeScreen() {
   };
 
   useEffect(() => {
-    // Show onboarding on first visit
-    AsyncStorage.getItem('onboarding_completed').then((val) => {
+    if (!user) return;
+    // Show onboarding on first visit per user
+    const key = `onboarding_completed_${user.email || user._id || 'default'}`;
+    AsyncStorage.getItem(key).then((val) => {
       if (!val) setShowOnboarding(true);
     }).catch(() => {});
-  }, []);
+  }, [user]);
 
   // Fetch real usage data from backend
   useEffect(() => {
