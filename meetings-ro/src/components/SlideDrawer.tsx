@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
-import { Home, FolderOpen, Calendar, X, Crown, LogOut, CreditCard, Trash2 } from 'lucide-react-native';
+import { Home, FolderOpen, Calendar, X, Crown, LogOut, CreditCard, Trash2, Users } from 'lucide-react-native';
 import { COLORS } from '../constants/theme';
 import { API_BASE_URL } from '../constants/config';
 import { useDrawer } from '../context/DrawerContext';
@@ -158,6 +158,18 @@ export default function SlideDrawer() {
             <Text style={styles.menuText}>Calendar</Text>
           </Pressable>
 
+          {user?.tenant_id && (
+            <Pressable onPress={() => handleNavigate('/team')} style={styles.menuItem}>
+              <Users size={20} color={COLORS.navy} />
+              <Text style={styles.menuText}>Echipa mea</Text>
+              {user?.role === 'admin' && (
+                <View style={styles.adminBadge}>
+                  <Text style={styles.adminBadgeText}>Admin</Text>
+                </View>
+              )}
+            </Pressable>
+          )}
+
           <View style={styles.separator} />
 
           <Pressable onPress={() => handleNavigate('/pricing')} style={styles.menuItem}>
@@ -309,5 +321,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9CA3AF',
     textAlign: 'center',
+  },
+  adminBadge: {
+    marginLeft: 'auto',
+    backgroundColor: '#DC262618',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  adminBadgeText: {
+    fontSize: 10,
+    color: '#DC2626',
+    fontWeight: '700',
   },
 });

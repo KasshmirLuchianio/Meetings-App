@@ -111,6 +111,8 @@ db = client[DB_NAME]
 meetings_col = db["meetings"]
 localities_col = db["localities"]
 users_col = db["users"]
+tenants_col = db["tenants"]
+invitations_col = db["invitations"]
 
 
 # ==================== AUTH HELPERS ====================
@@ -359,9 +361,15 @@ async def startup():
     # Meeting indexes for user-scoped queries
     await meetings_col.create_index("user_id")
     await meetings_col.create_index([("user_id", 1), ("created_at", -1)])
+    await meetings_col.create_index("tenant_id", sparse=True)
+    await users_col.create_index("tenant_id", sparse=True)
+    # Tenants + Invitations indexes
+    await tenants_col.create_index("created_by")
+    await invitations_col.create_index("token", unique=True)
+    await invitations_col.create_index("expires_at", expireAfterSeconds=0)
     await seed_default_localities()
     await create_demo_account()
-    print("[GAL] Server started. Indexes ensured.")
+    print("[Meetings.ro] Server started. Indexes ensured.")
 
 
 # ==================== AUTH ENDPOINTS ====================
@@ -1115,6 +1123,384 @@ async def health():
     return {"status": "ok", "service": "Meetings.ro API"}
 
 
+# ==================== TENANTS ====================
+
+class TenantCreate(BaseModel):
+    name: str
+    type: str  # primarie | ong | firma
+    vertical: str = "GENERAL"
+
+class InviteRequest(BaseModel):
+    email: str
+    role: str = "member"
+
+class RegisterWithInviteRequest(BaseModel):
+    token: str
+    name: str
+    password: str
+
+
+@app.post("/api/tenants")
+async def create_tenant(body: TenantCreate, user: dict = Depends(get_current_user)):
+    """Create a new tenant (organization). First user becomes admin."""
+    existing = await tenants_col.find_one({"created_by": str(user["_id"])})
+    if existing:
+        raise HTTPException(status_code=400, detail="Ai deja o organizație creată")
+
+    # Also block if already in a tenant (not created by him)
+    if user.get("tenant_id"):
+        raise HTTPException(status_code=400, detail="Ești deja membre al unei organizații")
+
+    valid_types = {"primarie", "ong", "firma", "consiliu", "spital", "scoala", "other"}
+    if body.type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"Tip invalid. Valori acceptate: {valid_types}")
+
+    valid_verticals = {"GENERAL", "GAL", "BANKING", "LEGAL", "JOURNALISM", "HEALTHCARE", "STARTUPS"}
+    vertical = body.vertical.upper() if body.vertical else "GENERAL"
+    if vertical not in valid_verticals:
+        vertical = "GENERAL"
+
+    now = datetime.now(timezone.utc)
+    tenant = {
+        "name": body.name,
+        "type": body.type,
+        "vertical": vertical,
+        "plan": "free",
+        "billing_email": user["email"],
+        "antet_text": body.name,
+        "stema_url": None,
+        "created_by": str(user["_id"]),
+        "created_at": now,
+    }
+    result = await tenants_col.insert_one(tenant)
+    tenant_id = str(result.inserted_id)
+
+    # Promote creator to admin of the new tenant
+    await users_col.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"tenant_id": tenant_id, "role": "admin"}}
+    )
+
+    tenant["_id"] = tenant_id
+    tenant["created_at"] = now.isoformat()
+    return {"tenant_id": tenant_id, **{k: v for k, v in tenant.items() if k != "_id"}}
+
+
+@app.get("/api/tenants/me")
+async def get_my_tenant(user: dict = Depends(get_current_user)):
+    """Get current user's tenant."""
+    tenant_id = user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=404, detail="Nu ești parte dintr-o organizație")
+    tenant = await tenants_col.find_one({"_id": ObjectId(tenant_id)})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Organizația nu există")
+    return serialize_doc(tenant)
+
+
+@app.patch("/api/tenants/me")
+async def update_my_tenant(
+    name: Optional[str] = None,
+    antet_text: Optional[str] = None,
+    vertical: Optional[str] = None,
+    user: dict = Depends(require_role("admin")),
+):
+    """Update tenant info (admin only)."""
+    tenant_id = user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=404, detail="Nu ești parte dintr-o organizație")
+    updates: dict = {}
+    if name:
+        updates["name"] = name
+    if antet_text:
+        updates["antet_text"] = antet_text
+    if vertical:
+        updates["vertical"] = vertical.upper()
+    if updates:
+        await tenants_col.update_one({"_id": ObjectId(tenant_id)}, {"$set": updates})
+    tenant = await tenants_col.find_one({"_id": ObjectId(tenant_id)})
+    return serialize_doc(tenant)
+
+
+@app.get("/api/tenants/me/members")
+async def get_tenant_members(user: dict = Depends(get_current_user)):
+    """List all members of the current user's tenant."""
+    tenant_id = user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=404, detail="Nu ești parte dintr-o organizație")
+    cursor = users_col.find(
+        {"tenant_id": tenant_id},
+        {"password_hash": 0, "verify_token": 0, "reset_token": 0}
+    )
+    members = []
+    async for m in cursor:
+        members.append(serialize_doc(m))
+    return {"members": members, "count": len(members)}
+
+
+@app.delete("/api/tenants/me/members/{user_id}")
+async def remove_tenant_member(user_id: str, user: dict = Depends(require_role("admin"))):
+    """Remove a member from the tenant (admin only). Cannot remove yourself."""
+    if user_id == str(user["_id"]):
+        raise HTTPException(status_code=400, detail="Nu poți elimina propriul cont din organizație")
+    target = await users_col.find_one({"_id": ObjectId(user_id)})
+    if not target or target.get("tenant_id") != user.get("tenant_id"):
+        raise HTTPException(status_code=404, detail="Membrul nu a fost găsit în organizație")
+    await users_col.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"tenant_id": None, "role": "member"}}
+    )
+    return {"message": "Membrul a fost eliminat din organizație"}
+
+
+# ==================== INVITE FLOW ====================
+
+INVITE_EMAIL_TEMPLATE = """
+<div style="font-family:sans-serif;max-width:480px;margin:40px auto;padding:0 24px;background:#fff;border-radius:12px;border:1px solid #E5E7EB">
+  <div style="padding:32px 0 24px">
+    <h1 style="color:#1B2A4A;font-size:22px;margin:0 0 8px">Ai fost invitat în {tenant_name}</h1>
+    <p style="color:#6B7280;font-size:15px;margin:0 0 24px">
+      Rolul tău va fi: <strong style="color:#1B2A4A">{role_label}</strong>
+    </p>
+    <a href="{accept_url}"
+       style="display:inline-block;background:#1B2A4A;color:#FAF8F3;padding:14px 28px;
+              border-radius:8px;text-decoration:none;font-size:15px;font-weight:600">
+        Acceptă invitația →
+    </a>
+    <p style="color:#9CA3AF;font-size:12px;margin-top:24px">Link valabil 7 zile. Dacă nu ești tu, ignoră acest email.</p>
+  </div>
+  <div style="border-top:1px solid #F3F4F6;padding:16px 0;text-align:center">
+    <span style="color:#9CA3AF;font-size:12px">Meetings.ro — Transcriere AI pentru organizații</span>
+  </div>
+</div>
+"""
+
+ROLE_LABELS_RO = {
+    "member": "Membru", "secretary": "Secretar", "mayor": "Primar",
+    "councilor": "Consilier", "clerk": "Funcționar", "admin": "Administrator"
+}
+VALID_ROLES = {"member", "secretary", "mayor", "councilor", "clerk", "admin"}
+API_BASE = os.environ.get("API_BASE_URL", "https://meetings-ro-api.onrender.com")
+
+
+@app.post("/api/tenants/invite")
+async def invite_member(body: InviteRequest, user: dict = Depends(require_role("admin"))):
+    """Invite a user to the tenant by email (admin only)."""
+    tenant_id = user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Nu ești parte dintr-o organizație")
+
+    role = body.role if body.role in VALID_ROLES else "member"
+    email = body.email.lower().strip()
+
+    # Check if already in this tenant
+    existing = await users_col.find_one({"email": email, "tenant_id": tenant_id})
+    if existing:
+        raise HTTPException(status_code=400, detail="Utilizatorul este deja în organizație")
+
+    # Revoke any old pending invite for same email+tenant
+    await invitations_col.delete_many({"email": email, "tenant_id": tenant_id})
+
+    invite_token = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    invite = {
+        "tenant_id": tenant_id,
+        "email": email,
+        "role": role,
+        "token": invite_token,
+        "invited_by": str(user["_id"]),
+        "expires_at": now + timedelta(days=7),
+        "created_at": now,
+    }
+    await invitations_col.insert_one(invite)
+
+    tenant = await tenants_col.find_one({"_id": ObjectId(tenant_id)})
+    tenant_name = tenant["name"] if tenant else "Meetings.ro"
+    accept_url = f"{API_BASE}/api/auth/accept-invite?token={invite_token}"
+    role_label = ROLE_LABELS_RO.get(role, role.capitalize())
+
+    try:
+        resend.Emails.send({
+            "from": "Meetings.ro <noreply@resend.dev>",
+            "to": [email],
+            "subject": f"Invitație să te alături organizației {tenant_name}",
+            "html": INVITE_EMAIL_TEMPLATE.format(
+                tenant_name=tenant_name,
+                role_label=role_label,
+                accept_url=accept_url,
+            ),
+        })
+    except Exception as e:
+        print(f"[Invite] Email failed: {e}. Token: {invite_token}")
+        # Don't fail — return token so admin can share manually if needed
+        return {
+            "message": f"Invitație creată (email eșuat). Token manual: {invite_token}",
+            "token": invite_token,
+            "accept_url": accept_url,
+        }
+
+    return {"message": f"Invitație trimisă la {email}", "accept_url": accept_url}
+
+
+@app.get("/api/tenants/me/invitations")
+async def list_pending_invitations(user: dict = Depends(require_role("admin"))):
+    """List pending invitations for the current tenant (admin only)."""
+    tenant_id = user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=404, detail="Nu ești parte dintr-o organizație")
+    now = datetime.now(timezone.utc)
+    cursor = invitations_col.find({"tenant_id": tenant_id, "expires_at": {"$gt": now}})
+    invites = []
+    async for inv in cursor:
+        inv["_id"] = str(inv["_id"])
+        inv["expires_at"] = inv["expires_at"].isoformat()
+        inv["created_at"] = inv["created_at"].isoformat()
+        invites.append(inv)
+    return {"invitations": invites}
+
+
+@app.delete("/api/tenants/me/invitations/{token}")
+async def revoke_invitation(token: str, user: dict = Depends(require_role("admin"))):
+    """Revoke a pending invitation (admin only)."""
+    tenant_id = user.get("tenant_id")
+    result = await invitations_col.delete_one({"token": token, "tenant_id": tenant_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Invitație negăsită")
+    return {"message": "Invitație revocată"}
+
+
+@app.get("/api/auth/accept-invite")
+async def accept_invite_page(token: str):
+    """Landing page when user clicks the invite link."""
+    invite = await invitations_col.find_one({
+        "token": token,
+        "expires_at": {"$gt": datetime.now(timezone.utc)}
+    })
+    if not invite:
+        return HTMLResponse("""
+            <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#FAF8F3">
+            <h1 style="color:#EF4444">Link invalid sau expirat</h1>
+            <p>Roagă administratorul să îți trimită o nouă invitație.</p>
+            </body></html>
+        """)
+
+    existing_user = await users_col.find_one({"email": invite["email"]})
+    if existing_user:
+        # User already exists → just assign tenant and role
+        await users_col.update_one(
+            {"_id": existing_user["_id"]},
+            {"$set": {"tenant_id": invite["tenant_id"], "role": invite["role"]}}
+        )
+        await invitations_col.delete_one({"token": token})
+        return HTMLResponse("""
+            <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#FAF8F3">
+            <h1 style="color:#1B2A4A">✓ Ai fost adăugat în organizație!</h1>
+            <p style="color:#6B7280">Deschide aplicația Meetings.ro și loghează-te din nou.</p>
+            </body></html>
+        """)
+
+    # New user → show registration page
+    tenant = await tenants_col.find_one({"_id": ObjectId(invite["tenant_id"])})
+    tenant_name = tenant["name"] if tenant else "Meetings.ro"
+    return HTMLResponse(f"""
+        <html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+        <body style="font-family:sans-serif;text-align:center;padding:60px;background:#FAF8F3;max-width:400px;margin:0 auto">
+        <h1 style="color:#1B2A4A">Bun venit în {tenant_name}!</h1>
+        <p style="color:#6B7280">Creează contul tău Meetings.ro folosind adresa<br>
+           <strong style="color:#1B2A4A">{invite["email"]}</strong></p>
+        <div style="background:#fff;border-radius:12px;padding:24px;border:1px solid #E5E7EB;margin-top:24px;text-align:left">
+          <p style="color:#9CA3AF;font-size:12px;text-align:center">
+            Folosește acest token în aplicație la înregistrare:<br>
+            <code style="background:#F3F4F6;padding:4px 8px;border-radius:4px;font-size:11px">{token}</code>
+          </p>
+        </div>
+        </body></html>
+    """)
+
+
+@app.post("/api/auth/register-with-invite")
+async def register_with_invite(body: RegisterWithInviteRequest):
+    """Register a new user via an invitation token."""
+    invite = await invitations_col.find_one({
+        "token": body.token,
+        "expires_at": {"$gt": datetime.now(timezone.utc)}
+    })
+    if not invite:
+        raise HTTPException(status_code=400, detail="Invitație invalidă sau expirată")
+
+    # Check email not already taken
+    existing = await users_col.find_one({"email": invite["email"]})
+    if existing:
+        # Already has account → just join tenant
+        await users_col.update_one(
+            {"_id": existing["_id"]},
+            {"$set": {"tenant_id": invite["tenant_id"], "role": invite["role"]}}
+        )
+        await invitations_col.delete_one({"token": body.token})
+        token_jwt = create_token(str(existing["_id"]), existing["email"])
+        return {
+            "token": token_jwt,
+            "name": existing.get("name", ""),
+            "email": existing["email"],
+            "role": invite["role"],
+            "tenant_id": invite["tenant_id"],
+        }
+
+    now = datetime.now(timezone.utc)
+    new_user = {
+        "email": invite["email"],
+        "name": body.name,
+        "password_hash": hash_password(body.password),
+        "company": None,
+        "plan": "FREE",
+        "role": invite["role"],
+        "tenant_id": invite["tenant_id"],
+        "is_verified": True,
+        "meetings_used_this_month": 0,
+        "last_monthly_reset": now,
+        "created_at": now,
+        "updated_at": now,
+    }
+    result = await users_col.insert_one(new_user)
+    await invitations_col.delete_one({"token": body.token})
+
+    token_jwt = create_token(str(result.inserted_id), invite["email"])
+    return {
+        "token": token_jwt,
+        "name": body.name,
+        "email": invite["email"],
+        "role": invite["role"],
+        "tenant_id": invite["tenant_id"],
+    }
+
+
+# ==================== ROLE MANAGEMENT ====================
+
+class RoleUpdateBody(BaseModel):
+    role: str
+
+
+@app.patch("/api/users/{user_id}/role")
+async def change_user_role(user_id: str, body: RoleUpdateBody, user: dict = Depends(require_role("admin"))):
+    """Change the role of a tenant member (admin only)."""
+    if body.role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Rol invalid. Roluri valide: {list(VALID_ROLES)}")
+
+    try:
+        target = await users_col.find_one({"_id": ObjectId(user_id)})
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID user invalid")
+    if not target:
+        raise HTTPException(status_code=404, detail="Utilizator negăsit")
+    if target.get("tenant_id") != user.get("tenant_id"):
+        raise HTTPException(status_code=403, detail="Nu poți modifica utilizatori din altă organizație")
+    if str(target["_id"]) == str(user["_id"]) and body.role != "admin":
+        raise HTTPException(status_code=400, detail="Nu îți poți retrage propriul rol de admin")
+
+    await users_col.update_one({"_id": ObjectId(user_id)}, {"$set": {"role": body.role}})
+    return {"message": f"Rol actualizat la {ROLE_LABELS_RO.get(body.role, body.role)}", "role": body.role}
+
+
 # ---- MEETINGS CRUD ----
 
 @app.post("/api/meetings")
@@ -1124,8 +1510,13 @@ async def create_meeting(data: MeetingCreate = None, user: dict = Depends(get_cu
 
     now = datetime.now(timezone.utc)
 
-    # Get vertical_type from request or default to GENERAL (universal)
-    vertical_type = data.vertical_type if data and hasattr(data, 'vertical_type') and data.vertical_type else "GENERAL"
+    # Determine vertical: explicit request > tenant config > GENERAL default
+    vertical_type = data.vertical_type if data and hasattr(data, 'vertical_type') and data.vertical_type else None
+    if not vertical_type:
+        if user.get("tenant_id"):
+            tenant_doc = await tenants_col.find_one({"_id": ObjectId(user["tenant_id"])})
+            vertical_type = tenant_doc.get("vertical") if tenant_doc else "GENERAL"
+        vertical_type = vertical_type or "GENERAL"
 
     meeting = {
         "title": (data.title if data and data.title else None),
