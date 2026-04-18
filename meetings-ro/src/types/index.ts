@@ -1,6 +1,8 @@
 // Core types pentru Meetings.ro
 
-export type VerticalType = 'GAL' | 'JOURNALISM' | 'LEGAL' | 'BANKING' | 'HEALTHCARE' | 'STARTUPS';
+export type VerticalType = 'GAL' | 'GENERAL' | 'JOURNALISM' | 'LEGAL' | 'BANKING' | 'HEALTHCARE' | 'STARTUPS';
+
+export type UserRole = 'member' | 'secretary' | 'mayor' | 'councilor' | 'clerk' | 'admin';
 
 // Pricing tiers
 export type PricingTier = 'FREE' | 'PRO' | 'ENTERPRISE';
@@ -25,6 +27,9 @@ export interface User {
   plan: PricingTier;
   meetings_used_this_month: number;
   created_at: string;
+  // Enterprise / RBAC fields
+  role?: UserRole;
+  tenant_id?: string | null;
 }
 
 export interface AuthTokens {

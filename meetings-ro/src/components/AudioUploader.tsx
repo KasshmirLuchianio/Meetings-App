@@ -128,7 +128,7 @@ export default function AudioUploader({ onUploadComplete, onLimitReached }: Audi
       if (attempt < UPLOAD_CONFIG.maxRetries - 1) {
         // Retry with exponential backoff
         const backoffMs = UPLOAD_CONFIG.backoffMs[attempt];
-        console.log(`Upload attempt ${attempt + 1} failed, retrying in ${backoffMs}ms...`);
+        // retry with exponential backoff (attempt ${attempt + 1})
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
         return uploadWithRetry(uri, meetingId, attempt + 1);
       }

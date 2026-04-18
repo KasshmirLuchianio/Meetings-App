@@ -12,12 +12,13 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
 Sentry.init({
   dsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
-  enableInExpoDevelopment: false,
   debug: false,
   tracesSampleRate: 0.2,
 });
@@ -149,6 +150,8 @@ export default function RootLayout() {
                   <Stack.Screen name="browse" />
                   <Stack.Screen name="calendar" />
                   <Stack.Screen name="onboarding" />
+                  <Stack.Screen name="team" options={{ headerShown: false }} />
+                  <Stack.Screen name="create-org" options={{ headerShown: false }} />
                   <Stack.Screen name="meeting/[id]" />
                 </Stack>
                 <SlideDrawer />

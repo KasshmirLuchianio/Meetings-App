@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
-import { Home, FolderOpen, Calendar, X, Crown, LogOut, CreditCard, Trash2, Users } from 'lucide-react-native';
+import { Home, FolderOpen, Calendar, X, Crown, LogOut, CreditCard, Trash2, Users, Building2 } from 'lucide-react-native';
 import { COLORS } from '../constants/theme';
 import { API_BASE_URL } from '../constants/config';
 import { useDrawer } from '../context/DrawerContext';
@@ -158,7 +158,7 @@ export default function SlideDrawer() {
             <Text style={styles.menuText}>Calendar</Text>
           </Pressable>
 
-          {user?.tenant_id && (
+          {user?.tenant_id ? (
             <Pressable onPress={() => handleNavigate('/team')} style={styles.menuItem}>
               <Users size={20} color={COLORS.navy} />
               <Text style={styles.menuText}>Echipa mea</Text>
@@ -167,6 +167,11 @@ export default function SlideDrawer() {
                   <Text style={styles.adminBadgeText}>Admin</Text>
                 </View>
               )}
+            </Pressable>
+          ) : (
+            <Pressable onPress={() => handleNavigate('/create-org')} style={styles.menuItem}>
+              <Building2 size={20} color={COLORS.navy} />
+              <Text style={styles.menuText}>Creează organizație</Text>
             </Pressable>
           )}
 
