@@ -944,13 +944,22 @@ async def extract_meeting_data(transcript: str, vertical_type: str = "GAL") -> d
 
     vertical_config = get_vertical_config(vertical_type)
 
+    # Truncate transcript to avoid 413 / context-limit errors — full text stays in MongoDB
+    MAX_TRANSCRIPT_LENGTH = 12000
+    if len(transcript) > MAX_TRANSCRIPT_LENGTH:
+        truncated = transcript[:MAX_TRANSCRIPT_LENGTH]
+        note = f"\n\n[NOTĂ: Transcrierea a fost trunchiată la {MAX_TRANSCRIPT_LENGTH} caractere din {len(transcript)} total pentru procesare AI]"
+        transcript_for_claude = truncated + note
+    else:
+        transcript_for_claude = transcript
+
     response = await anthropic_client.messages.create(
         model="claude-sonnet-4-5",
         max_tokens=2000,
         system=vertical_config.prompt_template,
         messages=[{
             "role": "user",
-            "content": f"Extrage informațiile structurate din această transcriere:\n\n{transcript}"
+            "content": f"Extrage informațiile structurate din această transcriere:\n\n{transcript_for_claude}"
         }]
     )
 
@@ -1020,19 +1029,34 @@ async def process_meeting(meeting_id: str):
         extracted = await extract_meeting_data(transcription["text"], vertical_type)
         print(f"[Meetings.ro] Extracted fields: {list(extracted.keys())}")
 
-        # Determine locality
-        locality = extracted.get("locality") or extracted.get("loc_desfasurare") or "Necunoscut"
+        # Determine locality from extracted fields — try multiple possible keys
+        raw_locality = (
+            extracted.get("localitate") or
+            extracted.get("locality") or
+            extracted.get("loc_desfasurare") or
+            extracted.get("location") or
+            ""
+        )
+        # Reject placeholder values
+        INVALID_LOCALITY = {"necunoscut", "unknown", "n/a", "na", "null", "none", "-", ""}
+        locality = raw_locality.strip() if raw_locality and raw_locality.strip().lower() not in INVALID_LOCALITY else None
 
-        # Generate title: DD.MM.YYYY | Localitatea
+        # Generate title: DD.MM.YYYY | Localitate  OR  DD.MM.YYYY | HH:MM
         created_at = meeting.get("created_at", datetime.now(timezone.utc))
         if isinstance(created_at, str):
             created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-        title = f"{created_at.strftime('%d.%m.%Y')} | {locality}"
+        if locality:
+            title = f"{created_at.strftime('%d.%m.%Y')} | {locality}"
+        else:
+            title = created_at.strftime("%d.%m.%Y | %H:%M")
+
+        # Save locality as "Necunoscut" only for DB purposes (backward compat), not in title
+        db_locality = locality or "Necunoscut"
 
         # Build update data — GAL fields at top level + vertical_config for all verticals
         update_data = {
             "title": title,
-            "locality": locality,
+            "locality": db_locality,
             "vertical_config": extracted,
             "status": "done",
             "error": None,
@@ -1050,9 +1074,9 @@ async def process_meeting(meeting_id: str):
             {"_id": ObjectId(meeting_id)},
             {"$set": update_data}
         )
-        
-        # Ensure locality exists in localities collection
-        if locality and locality != "Necunoscut":
+
+        # Ensure locality exists in localities collection (only real localities, not placeholders)
+        if locality:
             await localities_col.update_one(
                 {"name": locality},
                 {"$setOnInsert": {"name": locality, "created_at": datetime.now(timezone.utc)}, "$inc": {"count": 1}},

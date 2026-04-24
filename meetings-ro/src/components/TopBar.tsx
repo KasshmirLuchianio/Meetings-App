@@ -8,9 +8,10 @@ import { useDrawer } from '../context/DrawerContext';
 
 interface TopBarProps {
   showBack?: boolean;
+  rightComponent?: React.ReactNode;
 }
 
-export default function TopBar({ showBack }: TopBarProps) {
+export default function TopBar({ showBack, rightComponent }: TopBarProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { toggleDrawer } = useDrawer();
@@ -49,6 +50,7 @@ export default function TopBar({ showBack }: TopBarProps) {
         </View>
 
         <View className="flex-row items-center gap-3">
+          {rightComponent}
           <Pressable
             onPress={handleCalendarPress}
             className="h-11 w-11 items-center justify-center rounded-full active:bg-navy/10"

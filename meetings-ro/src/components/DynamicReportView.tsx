@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, ScrollView, Text, Pressable, ActivityIndicator,
-  RefreshControl, Alert, StyleSheet,
+  RefreshControl, Alert, StyleSheet, Modal, TextInput,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -10,7 +10,9 @@ import * as SecureStore from 'expo-secure-store';
 import {
   RefreshCw, Download, FileText, Sparkles, Users,
   MapPin, Calendar, Clock, ChevronDown, CheckCircle2, AlertTriangle, Scroll,
+  MoreVertical, Edit3, Trash2,
 } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 import { API_BASE_URL } from '../constants/config';
 import { useAuth } from '../context/AuthContext';
 import { authenticatedFetch } from '../utils/authenticatedFetch';
@@ -109,6 +111,7 @@ interface DiarizedEntry {
 
 // ── Main component ─────────────────────────────────────────
 export default function DynamicReportView({ meetingId }: { meetingId: string }) {
+  const router = useRouter();
   const { token } = useAuth();
   const [meeting, setMeeting] = useState<any>(null);
   const [verticalConfig, setVerticalConfig] = useState<any>(null);
@@ -119,6 +122,11 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
   const [isCorrecting, setIsCorrecting] = useState(false);
   const [transcriptExpanded, setTranscriptExpanded] = useState(false);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Rename / Delete modal
+  const [renameModal, setRenameModal] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
 
   // ── Data loading ───────────────────────────────────────
   useEffect(() => {
@@ -206,6 +214,74 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
     } finally {
       setExporting(null);
     }
+  };
+
+  // ── Meeting options (rename / delete) ──────────────────────
+  const handleMeetingOptions = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert(
+      'Opțiuni înregistrare',
+      '',
+      [
+        { text: 'Redenumește', onPress: openRenameModal },
+        { text: 'Șterge înregistrarea', style: 'destructive', onPress: confirmDelete },
+        { text: 'Anulează', style: 'cancel' },
+      ]
+    );
+  };
+
+  const openRenameModal = () => {
+    setRenameValue(meeting?.title || '');
+    setRenameModal(true);
+  };
+
+  const submitRename = async () => {
+    if (!renameValue.trim()) return;
+    setRenameLoading(true);
+    try {
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/meetings/${meetingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: renameValue.trim() }),
+      });
+      if (res.ok) {
+        setRenameModal(false);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        await loadMeetingData(true);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        Alert.alert('Eroare', err.detail || 'Nu am putut redenumi înregistrarea.');
+      }
+    } catch {
+      Alert.alert('Eroare', 'Verifică conexiunea la internet.');
+    } finally {
+      setRenameLoading(false);
+    }
+  };
+
+  const confirmDelete = () => {
+    Alert.alert(
+      'Șterge înregistrarea',
+      'Această acțiune este ireversibilă. Înregistrarea și raportul vor fi șterse definitiv.',
+      [
+        { text: 'Anulează', style: 'cancel' },
+        {
+          text: 'Șterge',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const res = await authenticatedFetch(`${API_BASE_URL}/api/meetings/${meetingId}`, { method: 'DELETE' });
+              if (res.ok) {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                router.back();
+              }
+            } catch {
+              Alert.alert('Eroare', 'Nu am putut șterge înregistrarea.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleCorrectTranscript = () => {
@@ -317,9 +393,18 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
     : transcript.substring(0, PREVIEW_LENGTH) + (needsTruncation ? '...' : '');
 
   // ── Render ─────────────────────────────────────────────
+  const optionsButton = (
+    <Pressable
+      onPress={handleMeetingOptions}
+      style={{ height: 44, width: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22 }}
+    >
+      <MoreVertical size={22} stroke={COLORS.navy} />
+    </Pressable>
+  );
+
   return (
     <View style={{ flex: 1, backgroundColor: '#F8F6F0' }}>
-      <TopBar showBack />
+      <TopBar showBack rightComponent={optionsButton} />
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: 40 }}
@@ -604,6 +689,52 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
 
         {/* Export buttons are now inside the report card above */}
       </ScrollView>
+
+      {/* ── RENAME MODAL ── */}
+      <Modal
+        visible={renameModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRenameModal(false)}
+      >
+        <View style={s.modalOverlay}>
+          <View style={s.modalBox}>
+            <View style={s.modalHeader}>
+              <Edit3 size={20} color={COLORS.navy} />
+              <Text style={s.modalTitle}>Redenumește înregistrarea</Text>
+            </View>
+            <TextInput
+              style={s.modalInput}
+              value={renameValue}
+              onChangeText={setRenameValue}
+              placeholder="Numele înregistrării"
+              placeholderTextColor="#9CA3AF"
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={submitRename}
+            />
+            <View style={s.modalBtnRow}>
+              <Pressable
+                style={s.modalCancelBtn}
+                onPress={() => setRenameModal(false)}
+              >
+                <Text style={s.modalCancelText}>Anulează</Text>
+              </Pressable>
+              <Pressable
+                style={[s.modalConfirmBtn, renameLoading && { opacity: 0.6 }]}
+                onPress={submitRename}
+                disabled={renameLoading}
+              >
+                {renameLoading ? (
+                  <ActivityIndicator size={16} color="#FFFFFF" />
+                ) : (
+                  <Text style={s.modalConfirmText}>Salvează</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -930,6 +1061,77 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     letterSpacing: 0.3,
+  },
+
+  // Rename Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  modalBox: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 10,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 20,
+  },
+  modalTitle: {
+    color: COLORS.navy,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  modalInput: {
+    borderWidth: 1.5,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    fontSize: 15,
+    color: '#1F2937',
+    backgroundColor: '#F9FAFB',
+    marginBottom: 20,
+  },
+  modalBtnRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    color: '#6B7280',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  modalConfirmBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: COLORS.navy,
+    alignItems: 'center',
+  },
+  modalConfirmText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
   },
 
   // Speaker diarization
