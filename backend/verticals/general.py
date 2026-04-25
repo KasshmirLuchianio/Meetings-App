@@ -1,6 +1,7 @@
 """
-General Vertical Configuration — Universal meeting format
-Works for any domain: business, associations, public institutions, etc.
+General Vertical Configuration — Universal format for any context.
+Covers personal recordings, informal conversations, family discussions,
+solo readings, and any context that doesn't fit a specialist vertical.
 """
 from .base import VerticalConfig, OutputField
 
@@ -9,9 +10,22 @@ GENERAL_CONFIG = VerticalConfig(
     name="GENERAL",
     display_name_ro="General",
     icon="📋",
-    description_ro="Format universal pentru orice tip de ședință sau întâlnire",
+    description_ro="Format universal pentru orice tip de înregistrare sau conversație",
     color_accent="#1B2A4A",
-    prompt_template="""Ești un asistent profesionist care extrage informații structurate din transcrierile ședințelor în limba română.
+    whisper_prompt=(
+        "Înregistrare audio în limba română. "
+        "Vorbire naturală, conversație, lectură sau monolog. "
+        "Orice context personal sau profesional."
+    ),
+    diarization_context=(
+        "Înregistrare generală. Poate fi: o singură persoană care citește sau vorbește, "
+        "o conversație între două persoane, o discuție în familie sau între prieteni, "
+        "un meeting informal. Identifică vorbitorii fără a presupune roluri formale. "
+        "Nu folosi titluri instituționale dacă nu sunt menționate explicit. "
+        "Dacă e o singură persoană: un singur vorbitor, fără diviziuni artificiale."
+    ),
+    expected_speakers=(1, 6),
+    prompt_template="""Ești un asistent profesionist care extrage informații structurate din transcrierile în limba română.
 
 REGULI:
 - NU inventa informații care nu sunt în transcriere
@@ -22,18 +36,18 @@ REGULI:
 
 FORMAT OUTPUT (JSON strict):
 {
-  "titlu": "Titlul sau subiectul principal al ședinței",
-  "data_desfasurare": "Data menționată în transcriere sau null",
+  "titlu": "Titlul sau subiectul principal",
+  "data_desfasurare": "Data menționată sau null",
   "loc_desfasurare": "Locația menționată sau null",
   "participanti": ["Lista persoanelor care au vorbit sau au fost menționate"],
   "subiecte_discutate": ["Lista subiectelor/punctelor discutate"],
-  "decizii": ["Deciziile luate în ședință, dacă există"],
+  "decizii": ["Deciziile luate, dacă există"],
   "actiuni_de_urmat": ["Acțiunile/task-urile stabilite, cu responsabil dacă e menționat"],
-  "concluzii": "Rezumatul concluziilor ședinței",
+  "concluzii": "Rezumatul concluziilor",
   "observatii": "Alte observații relevante sau null"
 }
 
-Dacă un câmp nu poate fi extras din transcriere, pune null (pentru string) sau [] (pentru array).
+Dacă un câmp nu poate fi extras, pune null (string) sau [] (array).
 Extrage cât mai multe detalii concrete din conversație.""",
     output_fields=[
         OutputField(key="titlu", label_ro="Titlu", field_type="text", required=True),

@@ -8,17 +8,21 @@ from .legal import LEGAL_CONFIG
 from .banking import BANKING_CONFIG
 from .healthcare import HEALTHCARE_CONFIG
 from .startups import STARTUPS_CONFIG
+from .personal_legal import PERSONAL_LEGAL_CONFIG
+from .solo_reading import SOLO_READING_CONFIG
 from .base import VerticalConfig
 
 
 VERTICALS = {
-    "GENERAL": GENERAL_CONFIG,
-    "GAL": GAL_CONFIG,
-    "JOURNALISM": JOURNALISM_CONFIG,
-    "LEGAL": LEGAL_CONFIG,
-    "BANKING": BANKING_CONFIG,
-    "HEALTHCARE": HEALTHCARE_CONFIG,
-    "STARTUPS": STARTUPS_CONFIG,
+    "GENERAL":        GENERAL_CONFIG,
+    "GAL":            GAL_CONFIG,
+    "JOURNALISM":     JOURNALISM_CONFIG,
+    "LEGAL":          LEGAL_CONFIG,
+    "BANKING":        BANKING_CONFIG,
+    "HEALTHCARE":     HEALTHCARE_CONFIG,
+    "STARTUPS":       STARTUPS_CONFIG,
+    "PERSONAL_LEGAL": PERSONAL_LEGAL_CONFIG,
+    "SOLO_READING":   SOLO_READING_CONFIG,
 }
 
 

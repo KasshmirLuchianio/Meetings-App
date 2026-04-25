@@ -45,5 +45,16 @@ FORMAT OUTPUT (JSON):
         OutputField(key="medical_team", label_ro="Echipa medicală", field_type="list"),
     ],
     predefined_locations=None,
-    color_accent="#DC2626"
+    color_accent="#DC2626",
+    whisper_prompt=(
+        "Consultație medicală sau ședință medicală în limba română. "
+        "Diagnostic, tratament, simptome, analize, rețetă, protocol medical. "
+        "Doctor, pacient, asistentă, medic specialist."
+    ),
+    diarization_context=(
+        "Consultație sau ședință medicală. Medicul pune întrebări și explică. "
+        "Pacientul sau familia descrie simptome. "
+        "Dacă e ședință de secție: un medic șef prezintă, colectivul intervine."
+    ),
+    expected_speakers=(2, 10),
 )

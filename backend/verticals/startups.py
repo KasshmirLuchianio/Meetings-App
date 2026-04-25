@@ -44,5 +44,16 @@ FORMAT OUTPUT (JSON):
         OutputField(key="next_sprint_goals", label_ro="Obiective sprint următor", field_type="list"),
     ],
     predefined_locations=None,
-    color_accent="#7C3AED"
+    color_accent="#7C3AED",
+    whisper_prompt=(
+        "Ședință de echipă sau pitch în limba română. "
+        "Startup, produs, MVP, user, feature, sprint, investitor, funding. "
+        "Fondator, developer, designer, investor, advisor."
+    ),
+    diarization_context=(
+        "Meeting de echipă startup sau pitch. Ton informal și dinamic. "
+        "Mulți participanți intervin frecvent și scurt. "
+        "Poate conține și termeni tehnici în engleză."
+    ),
+    expected_speakers=(2, 10),
 )

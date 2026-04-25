@@ -52,5 +52,16 @@ FORMAT OUTPUT (JSON strict - structura raport GAL):
         OutputField(key="concluzia", label_ro="Concluzia", field_type="textarea"),
     ],
     predefined_locations=["Chilia Veche", "Crișan", "C.A.Rosetti", "Maliuc", "Beștepe"],
-    color_accent="#1B2A4A"
+    color_accent="#1B2A4A",
+    whisper_prompt=(
+        "Ședință oficială în limba română. Consiliu local, primărie. "
+        "Ordinea de zi, proiect de hotărâre, vot pentru, abținere, împotrivă. "
+        "Domnul primar, doamna consilier, secretar general, proces verbal."
+    ),
+    diarization_context=(
+        "Ședință de consiliu local sau primărie. Protocol formal strict. "
+        "Un președinte conduce, un secretar citește, consilieri intervin scurt. "
+        "Fraze cheie: 'Supun la vot', 'Cine este pentru', 'Declar deschisă ședința'."
+    ),
+    expected_speakers=(2, 20),
 )

@@ -38,5 +38,16 @@ FORMAT OUTPUT (JSON):
         OutputField(key="parties_involved", label_ro="Părți implicate", field_type="list"),
     ],
     predefined_locations=None,
-    color_accent="#8B4513"
+    color_accent="#8B4513",
+    whisper_prompt=(
+        "Procedură juridică în limba română. Tribunal, judecătorie, notar. "
+        "Dosar, termen, reclamant, pârât, avocat, judecător, grefier. "
+        "Deliberare, sentință, pronunțare, articol din cod, jurisprudență."
+    ),
+    diarization_context=(
+        "Procedură juridică formală. Judecătorul conduce, grefierul consemnează. "
+        "Avocații pledează pe rând. Părțile răspund când sunt întrebate. "
+        "Transcriere exactă — nu interpreta, nu rezuma, fidelitate 100%."
+    ),
+    expected_speakers=(2, 8),
 )

@@ -38,5 +38,16 @@ FORMAT OUTPUT (JSON):
         OutputField(key="main_subject", label_ro="Subiect principal", field_type="text", required=True),
     ],
     predefined_locations=None,
-    color_accent="#B8962E"
+    color_accent="#B8962E",
+    whisper_prompt=(
+        "Interviu sau podcast în limba română. "
+        "Jurnalist, invitat, moderator, reporter. "
+        "Conversație fluentă, întrebări și răspunsuri, opinii, narațiuni."
+    ),
+    diarization_context=(
+        "Interviu sau podcast. De obicei 2 vorbitori: un moderator și un invitat. "
+        "Moderatorul pune întrebări scurte, invitatul răspunde amplu. "
+        "Dacă e panel: mai mulți invitați, moderatorul distribuie cuvântul."
+    ),
+    expected_speakers=(2, 6),
 )

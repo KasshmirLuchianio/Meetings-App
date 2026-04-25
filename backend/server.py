@@ -890,6 +890,61 @@ REGULI FORMAT:
 """
 
 
+# ── TASK 3: Vertical-aware Whisper prompt ─────────────────────────────
+def get_whisper_prompt(vertical_type: str) -> str:
+    """Returns the optimal Whisper initial_prompt for the given vertical.
+    Injects domain vocabulary to reduce WER for specialist terminology.
+    """
+    from verticals import get_vertical_config
+    try:
+        config = get_vertical_config(vertical_type)
+        if config.whisper_prompt:
+            return config.whisper_prompt
+    except Exception:
+        pass
+    # Universal fallback
+    return (
+        "Înregistrare audio în limba română. "
+        "Vorbire naturală sau formală. "
+        "Transcriere exactă, fidelă."
+    )
+
+
+# ── TASK 4: Vertical-aware diarization prompt builder ─────────────────
+def build_diarization_prompt(vertical_type: str) -> str:
+    """
+    Builds a context-aware diarization system prompt for the given vertical.
+    Combines the universal institutional rules with vertical-specific hints.
+    """
+    from verticals import get_vertical_config
+
+    # Universal rules — apply to all verticals
+    universal_rules = DIARIZATION_SYSTEM_PROMPT
+
+    # Vertical-specific context appendix
+    vertical_context = ""
+    try:
+        config = get_vertical_config(vertical_type)
+        if config.diarization_context:
+            vertical_context += f"\nCONTEXT SPECIFIC ACESTUI TIP DE ÎNREGISTRARE:\n{config.diarization_context}\n"
+        if config.expected_speakers:
+            mn, mx = config.expected_speakers
+            if mn == mx == 1:
+                vertical_context += (
+                    "\nATENȚIE SPECIALĂ: Aceasta este o înregistrare cu un singur vorbitor. "
+                    "NU fragmenta în mai mulți vorbitori. Un singur obiect în array.\n"
+                )
+            else:
+                vertical_context += (
+                    f"\nNumărul așteptat de vorbitori pentru acest tip de înregistrare: "
+                    f"între {mn} și {mx}.\n"
+                )
+    except Exception:
+        pass
+
+    return universal_rules + vertical_context
+
+
 # ==================== AUDIO PREPROCESSING ====================
 async def preprocess_audio(input_path: str) -> str:
     """
@@ -934,11 +989,11 @@ anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 
 
 # ==================== AI PROCESSING ====================
-async def transcribe_audio(file_path: str) -> dict:
+async def transcribe_audio(file_path: str, vertical_type: str = "GENERAL") -> dict:
     """
-    TASK 5b/5c — Transcribe audio using Groq Whisper (primary) or OpenAI Whisper (fallback).
-    Requests word + segment timestamps for finer diarization alignment.
-    Falls back to segment-only timestamps if word granularity is unsupported.
+    TASK 3/5b/5c — Transcribe audio using Groq Whisper (primary) or OpenAI Whisper (fallback).
+    Uses vertical-aware Whisper prompt for domain vocabulary injection.
+    Requests word + segment timestamps; falls back to segment-only if unsupported.
     """
     if groq_client:
         client = groq_client
@@ -951,10 +1006,9 @@ async def transcribe_audio(file_path: str) -> dict:
     else:
         raise RuntimeError("Nicio cheie API pentru transcriere configurată (GROQ_API_KEY sau OPENAI_API_KEY)")
 
-    WHISPER_PROMPT = (
-        "Aceasta este o înregistrare a unei ședințe în limba română. "
-        "Participanții vorbesc clar și discută subiecte profesionale."
-    )
+    # TASK 3 — vertical-aware Whisper prompt
+    WHISPER_PROMPT = get_whisper_prompt(vertical_type)
+    print(f"[Transcribe] Vertical: {vertical_type} | Prompt: {WHISPER_PROMPT[:60]}...")
 
     # Try with word + segment timestamps first
     response = None
@@ -1108,10 +1162,14 @@ def validate_and_fix_diarization(result: list, segments: list) -> list:
     return cleaned
 
 
-async def _diarize_with_claude_nlp(segments: list, segments_text: str = None) -> list:
+async def _diarize_with_claude_nlp(
+    segments: list,
+    segments_text: str = None,
+    vertical_type: str = "GENERAL",
+) -> list:
     """
-    TASK 1+2+3 — Single-call diarization path.
-    Two-pass: cheap Haiku context extraction → full Sonnet diarization with injected context.
+    TASK 1+2+3+4 — Single-call diarization path.
+    Two-pass: cheap Haiku context extraction → vertical-aware Sonnet diarization.
     Dynamic token budget based on segment count (min 4000, max 8000).
     """
     if not segments or not anthropic_client:
@@ -1144,11 +1202,14 @@ async def _diarize_with_claude_nlp(segments: list, segments_text: str = None) ->
     estimated_turns = len([s for s in segments if s.get("text", "").strip()])
     max_tokens_needed = min(8000, max(4000, estimated_turns * 60))
 
+    # TASK 4 — vertical-aware system prompt
+    system_prompt = build_diarization_prompt(vertical_type)
+
     try:
         response = await anthropic_client.messages.create(
             model="claude-sonnet-4-5",
             max_tokens=max_tokens_needed,
-            system=DIARIZATION_SYSTEM_PROMPT,
+            system=system_prompt,
             messages=[{"role": "user", "content": user_message}]
         )
 
@@ -1172,11 +1233,12 @@ async def _diarize_with_claude_nlp(segments: list, segments_text: str = None) ->
         return []
 
 
-async def diarize_long_transcript(segments: list) -> list:
+async def diarize_long_transcript(segments: list, vertical_type: str = "GENERAL") -> list:
     """
     TASK 4 — Chunked diarization for long transcripts (>MAX_DIARIZATION_CHUNK chars).
     Splits into overlapping chunks, diarizes each with speaker-continuity context,
     then merges by deduplicating on timestamp comparison.
+    Passes vertical_type to each chunk call for consistent prompt context.
     """
     # Build full formatted text once
     full_text = ""
@@ -1226,7 +1288,7 @@ async def diarize_long_transcript(segments: list) -> list:
             response = await anthropic_client.messages.create(
                 model="claude-sonnet-4-5",
                 max_tokens=6000,
-                system=DIARIZATION_SYSTEM_PROMPT,
+                system=build_diarization_prompt(vertical_type),
                 messages=[{
                     "role": "user",
                     "content": f"Identifică vorbitorii:\n\n{chunk_with_context}"
@@ -1259,10 +1321,16 @@ async def diarize_long_transcript(segments: list) -> list:
     return all_turns
 
 
-async def diarize_transcript(segments: list) -> list:
+async def diarize_transcript(
+    segments: list,
+    words: list = None,
+    audio_path: str = None,
+    vertical_type: str = "GENERAL",
+) -> list:
     """
     Public entry point for speaker diarization.
     Routes to chunked path for long transcripts, single-call for short ones.
+    Passes vertical_type through the entire chain for context-aware prompts.
     """
     if not segments or not anthropic_client:
         return []
@@ -1283,9 +1351,46 @@ async def diarize_transcript(segments: list) -> list:
     # TASK 4 — Route to chunked diarization for long transcripts
     if len(segments_text) > MAX_DIARIZATION_CHUNK:
         print(f"[Diarize] Long transcript ({len(segments_text)} chars) → chunked mode")
-        return await diarize_long_transcript(segments)
+        return await diarize_long_transcript(segments, vertical_type=vertical_type)
 
-    return await _diarize_with_claude_nlp(segments, segments_text)
+    return await _diarize_with_claude_nlp(segments, segments_text, vertical_type=vertical_type)
+
+
+async def detect_vertical(transcript_sample: str) -> str:
+    """
+    TASK 6 — Auto-detect the most appropriate vertical from transcript text.
+    Uses claude-haiku-4-5 (cheap, max_tokens=50) for speed and cost efficiency.
+    Called only when the user left vertical_type as "GENERAL".
+    Returns one of the registered vertical_type keys, or "GENERAL" on failure.
+    """
+    if not transcript_sample or not transcript_sample.strip():
+        return "GENERAL"
+
+    VALID_VERTICALS = {
+        "GAL", "LEGAL", "HEALTHCARE", "BANKING",
+        "JOURNALISM", "STARTUPS", "PERSONAL_LEGAL", "SOLO_READING", "GENERAL",
+    }
+
+    try:
+        response = await anthropic_client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=50,
+            system=(
+                "Clasifică textul într-una din categorii. "
+                "Răspunde DOAR cu una din (exact, fără alte cuvinte): "
+                "GAL, LEGAL, HEALTHCARE, BANKING, JOURNALISM, STARTUPS, "
+                "PERSONAL_LEGAL, SOLO_READING, GENERAL."
+            ),
+            messages=[{
+                "role": "user",
+                "content": f"Clasifică această transcriere:\n\n{transcript_sample[:1500]}"
+            }]
+        )
+        detected = response.content[0].text.strip().upper()
+        return detected if detected in VALID_VERTICALS else "GENERAL"
+    except Exception as e:
+        print(f"[AutoDetect] Failed: {e}")
+        return "GENERAL"
 
 
 async def extract_meeting_data(transcript: str, vertical_type: str = "GAL") -> dict:
@@ -1353,14 +1458,17 @@ async def process_meeting(meeting_id: str):
                 {"$set": {"status": "error", "error": "Fișier audio lipsă", "updated_at": datetime.now(timezone.utc)}}
             )
             return
-        
+
+        # Resolve vertical early — needed by transcription + diarization
+        vertical_type = meeting.get("vertical_type") or "GENERAL"
+
         # Step 1a: Preprocess audio (ffmpeg normalize + 16kHz WAV)
-        print(f"[GAL] Preprocessing audio for meeting {meeting_id}...")
+        print(f"[Pipeline] Preprocessing audio for meeting {meeting_id}...")
         processed_audio_path = await preprocess_audio(audio_path)
 
-        # Step 1b: Transcribe (word + segment timestamps)
-        print(f"[GAL] Transcribing meeting {meeting_id}...")
-        transcription = await transcribe_audio(processed_audio_path)
+        # Step 1b: Transcribe — vertical-aware Whisper prompt (TASK 3)
+        print(f"[Pipeline] Transcribing meeting {meeting_id} (vertical: {vertical_type})...")
+        transcription = await transcribe_audio(processed_audio_path, vertical_type=vertical_type)
 
         # Clean up preprocessed temp file if a new one was created
         if processed_audio_path != audio_path and os.path.exists(processed_audio_path):
@@ -1369,10 +1477,39 @@ async def process_meeting(meeting_id: str):
             except Exception:
                 pass
 
-        # Step 1c: Speaker diarization (two-pass NLP via Claude)
-        print(f"[Meetings.ro] Diarizing speakers for meeting {meeting_id}...")
-        diarized = await diarize_transcript(transcription["segments"])
-        print(f"[Meetings.ro] Found {len(set(d.get('speaker','') for d in diarized))} speakers in {len(diarized)} segments")
+        # TASK 6 — Auto-detect vertical when user left default "GENERAL"
+        if vertical_type == "GENERAL" and transcription.get("text"):
+            detected = await detect_vertical(transcription["text"][:1500])
+            if detected != "GENERAL":
+                print(f"[Pipeline] Auto-detected vertical: {detected}")
+                vertical_type = detected
+                await meetings_col.update_one(
+                    {"_id": ObjectId(meeting_id)},
+                    {"$set": {
+                        "vertical_type":          vertical_type,
+                        "vertical_auto_detected": True,
+                    }}
+                )
+
+        # TASK 5 — solo_reading bypasses diarization entirely
+        if vertical_type == "SOLO_READING":
+            diarized = [{
+                "speaker":   "Vorbitor",
+                "role":      None,
+                "timestamp": "00:00",
+                "text":      transcription["text"],
+            }]
+            print("[Pipeline] Solo reading — skipping diarization")
+        else:
+            # Step 1c: Speaker diarization — vertical-aware two-pass NLP (TASK 4)
+            print(f"[Pipeline] Diarizing speakers for meeting {meeting_id}...")
+            diarized = await diarize_transcript(
+                segments=transcription["segments"],
+                words=transcription.get("words", []),
+                audio_path=audio_path,
+                vertical_type=vertical_type,
+            )
+            print(f"[Pipeline] Found {len(set(d.get('speaker','') for d in diarized))} speakers in {len(diarized)} segments")
 
         await meetings_col.update_one(
             {"_id": ObjectId(meeting_id)},
@@ -1386,7 +1523,6 @@ async def process_meeting(meeting_id: str):
         )
 
         # Step 2: Extract structured data via Claude
-        vertical_type = meeting.get("vertical_type", "GAL")
         print(f"[Meetings.ro] Extracting data for meeting {meeting_id} (vertical: {vertical_type})...")
         extracted = await extract_meeting_data(transcription["text"], vertical_type)
         print(f"[Meetings.ro] Extracted fields: {list(extracted.keys())}")

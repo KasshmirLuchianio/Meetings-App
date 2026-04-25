@@ -38,5 +38,16 @@ FORMAT OUTPUT (JSON):
         OutputField(key="final_decision", label_ro="Decizie finală", field_type="textarea"),
     ],
     predefined_locations=None,
-    color_accent="#2C5F2D"
+    color_accent="#2C5F2D",
+    whisper_prompt=(
+        "Ședință corporativă sau bancară în limba română. "
+        "Raport financiar, buget, forecast, KPI, board, acționari. "
+        "Director general, CFO, manager, client, consultant."
+    ),
+    diarization_context=(
+        "Meeting corporativ semi-formal. Un moderator conduce agenda. "
+        "Participanții raportează pe rând sau dezbat. "
+        "Ton profesional, termeni financiari și de business frecvenți."
+    ),
+    expected_speakers=(2, 12),
 )
