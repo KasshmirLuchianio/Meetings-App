@@ -822,6 +822,107 @@ class MeetingUpdate(BaseModel):
     locality: Optional[str] = None
 
 
+# ==================== DIARIZATION CONSTANTS ====================
+MAX_DIARIZATION_CHUNK = 8000   # chars per Claude call
+CHUNK_OVERLAP = 500            # overlap between chunks for context continuity
+
+# TASK 1 — Engineered institutional diarization prompt
+DIARIZATION_SYSTEM_PROMPT = """Ești un expert în analiza transcrierilor din ședințe oficiale românești.
+Primești o transcriere cu timestamps dintr-o ședință instituțională (consiliu local, tribunal, spital, universitate, primărie).
+
+SARCINA: Identifică cu precizie maximă fiecare schimbare de vorbitor și atribuie corect fiecare replică.
+
+═══ REGULI DE IDENTIFICARE ════════════════════════════════════════
+
+1. PREZENTĂRI EXPLICITE (prioritate maximă):
+   - Dacă cineva spune "Eu sunt [Nume]", "Mă numesc [Nume]", "Din partea [instituției]" → folosește acel nume de acum încolo
+   - Dacă menționează funcția: "în calitate de primar", "ca secretar general" → adaugă funcția în câmpul "role"
+   - Dacă președintele ședinței se identifică la deschidere → păstrează-l ca speaker consistent
+
+2. FRAZE DE TRANZIȚIE (indică schimbare de vorbitor):
+   - "Vă mulțumesc", "Mulțumesc pentru cuvânt" → vorbitor curent cedează cuvântul
+   - "Dacă îmi permiteți", "Solicit cuvântul", "Cer cuvântul" → vorbitor nou intră
+   - "Domnul/Doamna [nume/funcție]" spus de altcineva → urmează intervenția acelei persoane
+   - "Supun la vot", "Cine este pentru?", "Împotrivă?", "Abțineri?" → ÎNTOTDEAUNA președinte/primar
+   - "Da / Nu / Abținere" ca răspuns izolat → consilier/participant care votează (nu schimbă speaker principal)
+
+3. ROLURI INSTITUȚIONALE (deduse din context):
+   - Cel care deschide ședința, citește ordinea de zi, conduce votul → Președinte ședință / Primar
+   - Cel care citește un referat sau raport → Secretar / Director / Referent
+   - Cei care intervin scurt cu "sunt de acord", "propun", "amendament" → Consilieri
+   - Cel care consemnează ("Am înregistrat", "Se consemnează") → Secretar general
+
+4. CONSISTENȚĂ (regula de aur):
+   - Dacă ai identificat că Vorbitor 1 e primarul → ORICE frază de vot sau deschidere ulterioară = același Vorbitor 1
+   - Nu schimba speaker dacă e aceeași persoană care continuă după o pauză scurtă (<3 secunde)
+   - Dacă două segmente consecutive au același pattern de vorbire și nu există semnal de schimbare → același vorbitor
+
+5. CÂND NU ȘTII:
+   - Folosește Vorbitor N (număr incremental)
+   - Nu inventa nume sau funcții
+   - Nu modifica niciun cuvânt din transcriere
+
+═══ STRUCTURI SPECIFICE DE ȘEDINȚĂ ════════════════════════════════
+
+Ședință consiliu local: Primar (conduce) → Secretar (citește) → Consilieri (intervin) → Primar (vot)
+Ședință tribunal: Judecător (conduce) → Grefier (consemnează) → Avocați → Părți
+Ședință medicală: Director (conduce) → Medici șefi (raportează) → Personal (intervenții)
+
+═══ FORMAT RĂSPUNS ═══════════════════════════════════════════════
+
+Răspunde STRICT cu JSON valid — array de obiecte, fără text în afara JSON-ului:
+[
+  {
+    "speaker": "Primar Ion Popescu",
+    "role": "Primar",
+    "timestamp": "00:00",
+    "text": "Declar deschisă ședința ordinară a Consiliului Local..."
+  }
+]
+
+REGULI FORMAT:
+- "speaker": nume real dacă identificat, altfel "Vorbitor 1", "Vorbitor 2" etc.
+- "role": funcția dacă identificată (ex: "Primar", "Secretar general", "Consilier"), altfel null
+- "timestamp": MM:SS al primului segment din grupul de replici
+- "text": textul exact din transcriere, grupat dacă același vorbitor continuă
+- Grupează segmentele consecutive ale aceluiași vorbitor într-un singur obiect
+- NU adăuga explicații, NU modifica textul transcrierii
+"""
+
+
+# ==================== AUDIO PREPROCESSING ====================
+async def preprocess_audio(input_path: str) -> str:
+    """
+    TASK 5a — Normalize audio to 16kHz mono WAV using ffmpeg for optimal Whisper accuracy.
+    Applies EBU R128 loudness normalization and resamples to 16kHz mono.
+    Returns path to preprocessed WAV, or original path if ffmpeg fails/unavailable.
+    """
+    base = input_path.rsplit('.', 1)[0]
+    output_path = f"{base}_preprocessed.wav"
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            'ffmpeg', '-y',
+            '-i', input_path,
+            '-ar', '16000',        # resample to 16kHz (Whisper native sample rate)
+            '-ac', '1',            # mono channel
+            '-af', 'loudnorm',     # EBU R128 loudness normalization
+            '-f', 'wav',
+            output_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        if proc.returncode == 0 and os.path.exists(output_path):
+            print(f"[Preprocess] Audio normalized → {output_path}")
+            return output_path
+        else:
+            print(f"[Preprocess] ffmpeg returned {proc.returncode}, using original file")
+            return input_path
+    except Exception as e:
+        print(f"[Preprocess] ffmpeg error: {e} — using original file")
+        return input_path
+
+
 # ==================== AI CLIENTS ====================
 # Groq for transcription (Whisper), OpenAI as fallback
 groq_client = AsyncOpenAI(
@@ -834,8 +935,11 @@ anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 
 # ==================== AI PROCESSING ====================
 async def transcribe_audio(file_path: str) -> dict:
-    """Transcribe audio using Groq Whisper (primary) or OpenAI Whisper (fallback)."""
-    # Pick client: Groq first, then OpenAI
+    """
+    TASK 5b/5c — Transcribe audio using Groq Whisper (primary) or OpenAI Whisper (fallback).
+    Requests word + segment timestamps for finer diarization alignment.
+    Falls back to segment-only timestamps if word granularity is unsupported.
+    """
     if groq_client:
         client = groq_client
         model = "whisper-large-v3"
@@ -847,18 +951,42 @@ async def transcribe_audio(file_path: str) -> dict:
     else:
         raise RuntimeError("Nicio cheie API pentru transcriere configurată (GROQ_API_KEY sau OPENAI_API_KEY)")
 
-    with open(file_path, "rb") as audio_file:
-        response = await client.audio.transcriptions.create(
-            model=model,
-            file=audio_file,
-            response_format="verbose_json",
-            language="ro",
-            prompt="Aceasta este o înregistrare a unei ședințe în limba română. Participanții vorbesc clar și discută subiecte profesionale.",
-            temperature=0.0,
-        )
+    WHISPER_PROMPT = (
+        "Aceasta este o înregistrare a unei ședințe în limba română. "
+        "Participanții vorbesc clar și discută subiecte profesionale."
+    )
+
+    # Try with word + segment timestamps first
+    response = None
+    try:
+        with open(file_path, "rb") as audio_file:
+            response = await client.audio.transcriptions.create(
+                model=model,
+                file=audio_file,
+                response_format="verbose_json",
+                language="ro",
+                prompt=WHISPER_PROMPT,
+                temperature=0.0,
+                timestamp_granularities=["word", "segment"],
+            )
+        print("[Transcribe] Word-level timestamps requested")
+    except Exception:
+        # Fallback: segment timestamps only
+        print("[Transcribe] Word timestamps not supported — falling back to segment-only")
+        with open(file_path, "rb") as audio_file:
+            response = await client.audio.transcriptions.create(
+                model=model,
+                file=audio_file,
+                response_format="verbose_json",
+                language="ro",
+                prompt=WHISPER_PROMPT,
+                temperature=0.0,
+            )
 
     transcript_text = response.text
     segments = []
+    words = []
+
     if hasattr(response, 'segments') and response.segments:
         for seg in response.segments:
             if isinstance(seg, dict):
@@ -866,23 +994,284 @@ async def transcribe_audio(file_path: str) -> dict:
             else:
                 segments.append({
                     "start": getattr(seg, 'start', 0),
-                    "end": getattr(seg, 'end', 0),
-                    "text": getattr(seg, 'text', '')
+                    "end":   getattr(seg, 'end', 0),
+                    "text":  getattr(seg, 'text', ''),
                 })
 
-    return {"text": transcript_text, "segments": segments}
+    # Extract word-level timestamps when available (TASK 5c)
+    if hasattr(response, 'words') and response.words:
+        for w in response.words:
+            if isinstance(w, dict):
+                words.append(w)
+            else:
+                words.append({
+                    "start": getattr(w, 'start', 0),
+                    "end":   getattr(w, 'end', 0),
+                    "word":  getattr(w, 'word', ''),
+                })
+        print(f"[Transcribe] Got {len(words)} word-level timestamps")
+
+    return {"text": transcript_text, "segments": segments, "words": words}
 
 
-async def diarize_transcript(segments: list) -> list:
-    """Use Claude to identify speakers from transcript segments with timestamps."""
+# ==================== SPEAKER DIARIZATION ====================
+
+async def extract_speaker_context(segments_text: str) -> str:
+    """
+    TASK 2 — First pass: cheap context extraction using claude-haiku-4-5.
+    Identifies meeting type, named speakers, and speaker count estimate
+    from the first 3000 chars. Returns JSON string injected into main pass.
+    """
+    try:
+        response = await anthropic_client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=500,
+            system=(
+                "Ești un analizor de transcrieri. Extrage DOAR informațiile explicit menționate.\n"
+                "Răspunde în JSON cu structura:\n"
+                '{"meeting_type": "...", "speakers_identified": [{"name": "...", "role": "..."}], '
+                '"total_speakers_estimate": N}'
+            ),
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Din această transcriere, extrage:\n"
+                    "1. Tipul ședinței (consiliu local / tribunal / medical / altul)\n"
+                    "2. Numele și funcțiile persoanelor menționate explicit\n"
+                    "3. Estimarea numărului de vorbitori diferiți\n\n"
+                    f"Transcriere (primele 3000 caractere):\n{segments_text[:3000]}"
+                )
+            }]
+        )
+        return response.content[0].text.strip()
+    except Exception as e:
+        print(f"[Diarize/Context] Extraction failed: {e}")
+        return "{}"
+
+
+def validate_and_fix_diarization(result: list, segments: list) -> list:
+    """
+    TASK 3 — Post-process Claude diarization output:
+    - Remove empty / too-short entries
+    - Normalize "Vorbitor 0" → "Vorbitor 1"
+    - Validate MM:SS timestamp format
+    - Fallback to single-speaker block if result is empty but segments exist
+    """
+    if not isinstance(result, list):
+        return []
+
+    cleaned = []
+    speaker_map: dict = {}
+
+    for item in result:
+        if not isinstance(item, dict):
+            continue
+
+        text = item.get("text", "").strip()
+        if not text or len(text) < 2:
+            continue
+
+        speaker = item.get("speaker", "").strip()
+        if not speaker:
+            speaker = f"Vorbitor {len(speaker_map) + 1}"
+
+        # Normalize "Vorbitor 0" → "Vorbitor 1"
+        if re.match(r'^Vorbitor\s+0$', speaker, re.IGNORECASE):
+            speaker = "Vorbitor 1"
+
+        if speaker not in speaker_map:
+            speaker_map[speaker] = speaker
+
+        # Validate / coerce timestamp to MM:SS
+        ts = str(item.get("timestamp", "00:00"))
+        if not re.match(r'^\d{2}:\d{2}$', ts):
+            ts = "00:00"
+
+        cleaned.append({
+            "speaker": speaker_map[speaker],
+            "role":    item.get("role") or None,
+            "timestamp": ts,
+            "text":    text,
+        })
+
+    # Sanity fallback: if Claude returned nothing but segments exist
+    if not cleaned and segments:
+        fallback_text = " ".join(s.get("text", "") for s in segments[:50]).strip()
+        if fallback_text:
+            return [{
+                "speaker":   "Vorbitor 1",
+                "role":      None,
+                "timestamp": "00:00",
+                "text":      fallback_text,
+            }]
+
+    return cleaned
+
+
+async def _diarize_with_claude_nlp(segments: list, segments_text: str = None) -> list:
+    """
+    TASK 1+2+3 — Single-call diarization path.
+    Two-pass: cheap Haiku context extraction → full Sonnet diarization with injected context.
+    Dynamic token budget based on segment count (min 4000, max 8000).
+    """
     if not segments or not anthropic_client:
         return []
 
-    # Build a text block from segments with timestamps
+    # Build segments_text if caller didn't pre-build it
+    if segments_text is None:
+        segments_text = ""
+        for seg in segments:
+            start = seg.get("start", 0)
+            text  = seg.get("text", "").strip()
+            if text:
+                minutes = int(start // 60)
+                seconds = int(start % 60)
+                segments_text += f"[{minutes:02d}:{seconds:02d}] {text}\n"
+
+    if not segments_text.strip():
+        return []
+
+    # PASS 1 — cheap context extraction with Haiku (TASK 2)
+    speaker_context = await extract_speaker_context(segments_text)
+
+    # Build enriched user message
+    user_message = (
+        f"CONTEXT EXTRAS DIN TRANSCRIERE:\n{speaker_context}\n\n"
+        f"TRANSCRIERE COMPLETĂ DE DIARIZAT:\n\n{segments_text}"
+    )
+
+    # Dynamic token budget (TASK 3): ~60 tokens per segment turn
+    estimated_turns = len([s for s in segments if s.get("text", "").strip()])
+    max_tokens_needed = min(8000, max(4000, estimated_turns * 60))
+
+    try:
+        response = await anthropic_client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=max_tokens_needed,
+            system=DIARIZATION_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_message}]
+        )
+
+        response_text = response.content[0].text.strip()
+        try:
+            result = json.loads(response_text)
+        except json.JSONDecodeError:
+            json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group(0))
+            else:
+                print("[Diarize] Could not parse JSON from Claude response")
+                return validate_and_fix_diarization([], segments)
+
+        return validate_and_fix_diarization(
+            result if isinstance(result, list) else [], segments
+        )
+
+    except Exception as e:
+        print(f"[Diarize] Error: {e}")
+        return []
+
+
+async def diarize_long_transcript(segments: list) -> list:
+    """
+    TASK 4 — Chunked diarization for long transcripts (>MAX_DIARIZATION_CHUNK chars).
+    Splits into overlapping chunks, diarizes each with speaker-continuity context,
+    then merges by deduplicating on timestamp comparison.
+    """
+    # Build full formatted text once
+    full_text = ""
+    for seg in segments:
+        start = seg.get("start", 0)
+        text  = seg.get("text", "").strip()
+        if text:
+            minutes = int(start // 60)
+            seconds = int(start % 60)
+            full_text += f"[{minutes:02d}:{seconds:02d}] {text}\n"
+
+    if not full_text.strip():
+        return []
+
+    # Split into chunks at newline boundaries
+    chunks = []
+    start_idx = 0
+    while start_idx < len(full_text):
+        end_idx = start_idx + MAX_DIARIZATION_CHUNK
+        if end_idx < len(full_text):
+            # Snap to last newline to avoid cutting mid-segment
+            newline_idx = full_text.rfind('\n', start_idx, end_idx)
+            if newline_idx > start_idx:
+                end_idx = newline_idx + 1
+        chunks.append(full_text[start_idx:end_idx])
+        start_idx = end_idx - CHUNK_OVERLAP
+
+    print(f"[Diarize] Long transcript split into {len(chunks)} chunks")
+
+    all_turns: list = []
+    previous_speakers: list = []
+
+    for i, chunk in enumerate(chunks):
+        # Carry speaker labels from previous chunk for consistency
+        context_note = ""
+        if previous_speakers:
+            speaker_list = ", ".join(set(previous_speakers[-10:]))
+            context_note = (
+                f"NOTĂ: Aceasta este continuarea ședinței. "
+                f"Vorbitorii identificați până acum: {speaker_list}. "
+                f"Păstrează aceleași etichete pentru aceiași vorbitori.\n\n"
+            )
+
+        chunk_with_context = context_note + chunk
+
+        try:
+            response = await anthropic_client.messages.create(
+                model="claude-sonnet-4-5",
+                max_tokens=6000,
+                system=DIARIZATION_SYSTEM_PROMPT,
+                messages=[{
+                    "role": "user",
+                    "content": f"Identifică vorbitorii:\n\n{chunk_with_context}"
+                }]
+            )
+            response_text = response.content[0].text.strip()
+            try:
+                chunk_result = json.loads(response_text)
+            except json.JSONDecodeError:
+                json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+                chunk_result = json.loads(json_match.group(0)) if json_match else []
+
+            chunk_result = validate_and_fix_diarization(
+                chunk_result if isinstance(chunk_result, list) else [], []
+            )
+
+            # Deduplicate overlap: skip turns whose timestamp ≤ last saved turn
+            if all_turns and chunk_result:
+                last_ts = all_turns[-1].get("timestamp", "00:00")
+                chunk_result = [t for t in chunk_result if t.get("timestamp", "99:99") > last_ts]
+
+            all_turns.extend(chunk_result)
+            previous_speakers.extend([t["speaker"] for t in chunk_result])
+            print(f"[Diarize] Chunk {i + 1}/{len(chunks)} → {len(chunk_result)} turns")
+
+        except Exception as e:
+            print(f"[Diarize] Chunk {i + 1}/{len(chunks)} failed: {e}")
+            continue
+
+    return all_turns
+
+
+async def diarize_transcript(segments: list) -> list:
+    """
+    Public entry point for speaker diarization.
+    Routes to chunked path for long transcripts, single-call for short ones.
+    """
+    if not segments or not anthropic_client:
+        return []
+
+    # Pre-build segments_text to measure total length
     segments_text = ""
     for seg in segments:
         start = seg.get("start", 0)
-        text = seg.get("text", "").strip()
+        text  = seg.get("text", "").strip()
         if text:
             minutes = int(start // 60)
             seconds = int(start % 60)
@@ -891,51 +1280,12 @@ async def diarize_transcript(segments: list) -> list:
     if not segments_text.strip():
         return []
 
-    try:
-        response = await anthropic_client.messages.create(
-            model="claude-sonnet-4-5",
-            max_tokens=4000,
-            system=(
-                "Ești un expert în analiza conversațiilor. Primești o transcriere cu timestamps dintr-o ședință cu mai mulți participanți.\n\n"
-                "SARCINA TA: Identifică schimbările de vorbitor și etichetează fiecare replică.\n\n"
-                "REGULI:\n"
-                "- Analizează contextul, pauzele, schimbările de subiect și formulările pentru a detecta când vorbește altcineva\n"
-                "- Etichetează vorbitorii ca: Vorbitor 1, Vorbitor 2, Vorbitor 3 etc.\n"
-                "- Dacă un vorbitor se prezintă cu numele (ex: 'Eu sunt Ion Popescu'), folosește numele real de atunci încolo\n"
-                "- Dacă menționează funcția (ex: 'ca primar' sau 'în calitate de secretar'), adaugă funcția\n"
-                "- Grupează segmentele consecutive ale aceluiași vorbitor într-o singură replică\n"
-                "- Păstrează timestamps-ul de start al primului segment din grup\n\n"
-                "RĂSPUNDE STRICT ÎN FORMAT JSON — un array de obiecte:\n"
-                '[{"speaker": "Vorbitor 1", "role": null, "timestamp": "00:00", "text": "..."}]\n\n'
-                "Dacă un vorbitor are nume identificat, speaker devine numele. Dacă are funcție, role devine funcția.\n"
-                "NU adăuga text inventat. NU modifica cuvintele din transcriere. Doar etichetează și grupează."
-            ),
-            messages=[{
-                "role": "user",
-                "content": f"Identifică vorbitorii din această transcriere de ședință:\n\n{segments_text}"
-            }]
-        )
+    # TASK 4 — Route to chunked diarization for long transcripts
+    if len(segments_text) > MAX_DIARIZATION_CHUNK:
+        print(f"[Diarize] Long transcript ({len(segments_text)} chars) → chunked mode")
+        return await diarize_long_transcript(segments)
 
-        response_text = response.content[0].text.strip()
-
-        # Parse JSON
-        try:
-            result = json.loads(response_text)
-        except json.JSONDecodeError:
-            json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group(0))
-            else:
-                print(f"[Diarize] Could not parse JSON from Claude response")
-                return []
-
-        if isinstance(result, list):
-            return result
-        return []
-
-    except Exception as e:
-        print(f"[Diarize] Error: {e}")
-        return []
+    return await _diarize_with_claude_nlp(segments, segments_text)
 
 
 async def extract_meeting_data(transcript: str, vertical_type: str = "GAL") -> dict:
@@ -1004,11 +1354,22 @@ async def process_meeting(meeting_id: str):
             )
             return
         
-        # Step 1: Transcribe
+        # Step 1a: Preprocess audio (ffmpeg normalize + 16kHz WAV)
+        print(f"[GAL] Preprocessing audio for meeting {meeting_id}...")
+        processed_audio_path = await preprocess_audio(audio_path)
+
+        # Step 1b: Transcribe (word + segment timestamps)
         print(f"[GAL] Transcribing meeting {meeting_id}...")
-        transcription = await transcribe_audio(audio_path)
-        
-        # Step 1b: Speaker diarization
+        transcription = await transcribe_audio(processed_audio_path)
+
+        # Clean up preprocessed temp file if a new one was created
+        if processed_audio_path != audio_path and os.path.exists(processed_audio_path):
+            try:
+                os.remove(processed_audio_path)
+            except Exception:
+                pass
+
+        # Step 1c: Speaker diarization (two-pass NLP via Claude)
         print(f"[Meetings.ro] Diarizing speakers for meeting {meeting_id}...")
         diarized = await diarize_transcript(transcription["segments"])
         print(f"[Meetings.ro] Found {len(set(d.get('speaker','') for d in diarized))} speakers in {len(diarized)} segments")
@@ -1016,10 +1377,11 @@ async def process_meeting(meeting_id: str):
         await meetings_col.update_one(
             {"_id": ObjectId(meeting_id)},
             {"$set": {
-                "transcript": transcription["text"],
-                "segments": transcription["segments"],
+                "transcript":          transcription["text"],
+                "segments":            transcription["segments"],
+                "words":               transcription.get("words", []),
                 "diarized_transcript": diarized,
-                "updated_at": datetime.now(timezone.utc)
+                "updated_at":          datetime.now(timezone.utc),
             }}
         )
 
