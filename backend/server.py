@@ -2655,6 +2655,77 @@ async def delete_meeting(meeting_id: str, user: dict = Depends(get_current_user)
     return {"status": "deleted"}
 
 
+# ---- FEEDBACK ----
+
+class FeedbackPayload(BaseModel):
+    rating: int                          # 1 = positive, -1 = negative
+    issues: Optional[List[str]] = []     # only on negative: selected issue chips
+    comment: Optional[str] = None        # optional free text (future use)
+
+
+@app.post("/api/meetings/{meeting_id}/feedback")
+async def submit_feedback(
+    meeting_id: str,
+    payload: FeedbackPayload,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Saves user quality feedback on a transcription.
+    Used for production quality monitoring — not shown to other users.
+    """
+    if not ObjectId.is_valid(meeting_id):
+        raise HTTPException(status_code=400, detail="Invalid meeting ID")
+
+    meeting = await meetings_col.find_one({
+        "_id": ObjectId(meeting_id),
+        "user_id": user["_id"],
+    })
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    feedback_doc = {
+        "rating":           payload.rating,
+        "issues":           payload.issues or [],
+        "comment":          payload.comment,
+        "submitted_at":     datetime.now(timezone.utc),
+        "vertical_type":    meeting.get("vertical_type", "GENERAL"),
+        "chunks_total":     meeting.get("processing_chunks_total", 1),
+        "duration_seconds": meeting.get("duration"),
+    }
+
+    await meetings_col.update_one(
+        {"_id": ObjectId(meeting_id)},
+        {"$set": {"feedback": feedback_doc}},
+    )
+
+    rating_label = "👍 POSITIVE" if payload.rating == 1 else "👎 NEGATIVE"
+    print(
+        f"[Feedback] {rating_label} | meeting={meeting_id} | "
+        f"issues={payload.issues} | vertical={meeting.get('vertical_type')}"
+    )
+
+    return {"ok": True}
+
+
+@app.get("/api/meetings/{meeting_id}/feedback")
+async def get_feedback(
+    meeting_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Returns existing feedback for a meeting, if any."""
+    if not ObjectId.is_valid(meeting_id):
+        raise HTTPException(status_code=400, detail="Invalid meeting ID")
+
+    meeting = await meetings_col.find_one(
+        {"_id": ObjectId(meeting_id), "user_id": user["_id"]},
+        {"feedback": 1},
+    )
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    return meeting.get("feedback", None)
+
+
 # ---- ACTION ITEMS ----
 
 @app.patch("/api/meetings/{meeting_id}/actions/{action_id}")

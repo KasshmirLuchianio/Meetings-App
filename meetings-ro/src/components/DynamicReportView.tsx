@@ -17,6 +17,7 @@ import { API_BASE_URL } from '../constants/config';
 import { useAuth } from '../context/AuthContext';
 import { authenticatedFetch } from '../utils/authenticatedFetch';
 import TopBar from '../components/TopBar';
+import TranscriptionFeedback from '../components/TranscriptionFeedback';
 import { COLORS } from '../constants/theme';
 
 // ── Status config ──────────────────────────────────────────
@@ -128,6 +129,12 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
   const [renameValue, setRenameValue] = useState('');
   const [renameLoading, setRenameLoading] = useState(false);
 
+  // Transcription feedback
+  const [existingFeedback, setExistingFeedback] = useState<{
+    rating: 1 | -1;
+    issues?: string[];
+  } | null>(null);
+
   // ── Data loading ───────────────────────────────────────
   useEffect(() => {
     if (meetingId) loadMeetingData();
@@ -146,6 +153,24 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
   }, [meetingId, meeting?.status]);
+
+  // Fetch existing feedback once when screen loads
+  useEffect(() => {
+    const fetchFeedback = async () => {
+      try {
+        const res = await authenticatedFetch(
+          `${API_BASE_URL}/api/meetings/${meetingId}/feedback`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (data) setExistingFeedback(data);
+        }
+      } catch {
+        // Non-fatal — feedback is optional
+      }
+    };
+    fetchFeedback();
+  }, [meetingId]);
 
   const safeFetchJson = async (url: string) => {
     const res = await authenticatedFetch(url);
@@ -281,6 +306,20 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
           },
         },
       ]
+    );
+  };
+
+  const handleFeedbackSubmit = async (
+    rating: 1 | -1,
+    issues: string[] = []
+  ): Promise<void> => {
+    await authenticatedFetch(
+      `${API_BASE_URL}/api/meetings/${meetingId}/feedback`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rating, issues }),
+      }
     );
   };
 
@@ -687,7 +726,14 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
           </View>
         )}
 
-        {/* Export buttons are now inside the report card above */}
+        {/* ── TRANSCRIPTION FEEDBACK ── */}
+        {isDone && (
+          <TranscriptionFeedback
+            meetingId={meetingId}
+            existingFeedback={existingFeedback}
+            onFeedbackSubmit={handleFeedbackSubmit}
+          />
+        )}
       </ScrollView>
 
       {/* ── RENAME MODAL ── */}
