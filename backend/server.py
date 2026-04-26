@@ -2,8 +2,11 @@ import os
 import json
 import uuid
 import re
+import math
+import glob
 import asyncio
 import secrets
+import tempfile
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from io import BytesIO
@@ -62,6 +65,34 @@ CORS_ALLOWED_ORIGINS = [
 
 UPLOAD_DIR = Path("/app/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def cleanup_orphaned_temp_files():
+    """
+    TASK 8 — Remove leftover temp WAV files from jobs that crashed mid-pipeline.
+    Patterns: *_preprocessed.wav, *_chunk_NNN.wav, *_clean.wav
+    Searches both UPLOAD_DIR and the system temp directory.
+    Called once at process startup.
+    """
+    search_dirs = [str(UPLOAD_DIR), tempfile.gettempdir()]
+    patterns = ["*_preprocessed.wav", "*_chunk_*.wav", "*_clean.wav"]
+    removed = 0
+    for directory in search_dirs:
+        for pattern in patterns:
+            for path in glob.glob(os.path.join(directory, pattern)):
+                try:
+                    os.remove(path)
+                    removed += 1
+                    print(f"[Startup] Removed orphan temp file: {path}")
+                except Exception as e:
+                    print(f"[Startup] Could not remove {path}: {e}")
+    if removed:
+        print(f"[Startup] Cleaned {removed} orphaned temp file(s)")
+    else:
+        print("[Startup] No orphaned temp files found")
+
+
+cleanup_orphaned_temp_files()
 
 # ==================== APP ====================
 limiter = Limiter(key_func=get_remote_address)
@@ -978,6 +1009,80 @@ async def preprocess_audio(input_path: str) -> str:
         return input_path
 
 
+# ==================== AUDIO SPLITTING ====================
+GROQ_MAX_BYTES = 20 * 1024 * 1024    # 20MB safety margin (Groq hard limit is 25MB)
+CHUNK_DURATION_SECONDS = 600          # 10-minute chunks
+
+
+async def split_audio_if_needed(audio_path: str) -> list:
+    """
+    TASK 4 — Split audio into ≤10-minute WAV chunks if file exceeds GROQ_MAX_BYTES.
+    Uses ffprobe to get total duration, then ffmpeg segment split.
+    Returns list of (chunk_path, time_offset_seconds) tuples.
+    If file is within limit, returns [(audio_path, 0.0)] — no split, no copy.
+    All chunk files are written to the same directory as audio_path.
+    """
+    file_size = os.path.getsize(audio_path)
+    if file_size <= GROQ_MAX_BYTES:
+        print(f"[Split] {file_size / 1024 / 1024:.1f}MB ≤ 20MB — no split needed")
+        return [(audio_path, 0.0)]
+
+    print(f"[Split] {file_size / 1024 / 1024:.1f}MB > 20MB — splitting into {CHUNK_DURATION_SECONDS}s chunks")
+
+    # Get total duration via ffprobe
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            'ffprobe', '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            audio_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        total_duration = float(stdout.decode().strip())
+        print(f"[Split] Total duration: {total_duration:.1f}s")
+    except Exception as e:
+        print(f"[Split] ffprobe failed: {e} — transcribing as single file (may hit Groq limit)")
+        return [(audio_path, 0.0)]
+
+    n_chunks = math.ceil(total_duration / CHUNK_DURATION_SECONDS)
+    base = audio_path.rsplit('.', 1)[0]
+    chunks = []
+
+    for i in range(n_chunks):
+        start = i * CHUNK_DURATION_SECONDS
+        chunk_path = f"{base}_chunk_{i:03d}.wav"
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                'ffmpeg', '-y',
+                '-i', audio_path,
+                '-ss', str(start),
+                '-t', str(CHUNK_DURATION_SECONDS),
+                '-ar', '16000',
+                '-ac', '1',
+                '-f', 'wav',
+                chunk_path,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+            if proc.returncode == 0 and os.path.exists(chunk_path):
+                chunk_mb = os.path.getsize(chunk_path) / 1024 / 1024
+                print(f"[Split] Chunk {i + 1}/{n_chunks}: offset={start}s, {chunk_mb:.1f}MB → {chunk_path}")
+                chunks.append((chunk_path, float(start)))
+            else:
+                print(f"[Split] ffmpeg error for chunk {i + 1} (returncode={proc.returncode})")
+        except Exception as e:
+            print(f"[Split] Error creating chunk {i + 1}: {e}")
+
+    if not chunks:
+        print("[Split] All chunk attempts failed — falling back to original file")
+        return [(audio_path, 0.0)]
+
+    return chunks
+
+
 # ==================== AI CLIENTS ====================
 # Groq for transcription (Whisper), OpenAI as fallback
 groq_client = AsyncOpenAI(
@@ -1066,6 +1171,77 @@ async def transcribe_audio(file_path: str, vertical_type: str = "GENERAL") -> di
         print(f"[Transcribe] Got {len(words)} word-level timestamps")
 
     return {"text": transcript_text, "segments": segments, "words": words}
+
+
+async def transcribe_with_chunking(audio_path: str, vertical_type: str = "GENERAL") -> dict:
+    """
+    TASK 5 — Full transcription orchestrator:
+      preprocess (ffmpeg 16kHz mono) → split if >20MB → transcribe each chunk →
+      merge text/segments/words with offset timestamps → cleanup all temp files.
+    Returns merged {text, segments, words} dict identical in shape to transcribe_audio().
+    """
+    # Step 1: Normalize audio
+    processed_path = await preprocess_audio(audio_path)
+    preprocessed_created = (processed_path != audio_path)
+    chunk_paths_to_cleanup = []
+
+    try:
+        # Step 2: Split if needed
+        chunks = await split_audio_if_needed(processed_path)
+        is_split = len(chunks) > 1
+
+        # Track which temp files to delete (only chunk files, not the preprocessed file itself)
+        if is_split:
+            chunk_paths_to_cleanup = [p for p, _ in chunks]
+
+        # Step 3: Transcribe each chunk, merge results
+        all_text_parts: list = []
+        all_segments: list = []
+        all_words: list = []
+
+        for idx, (chunk_path, time_offset) in enumerate(chunks):
+            label = f"chunk {idx + 1}/{len(chunks)}" if is_split else "full file"
+            print(f"[Transcribe] {label} | offset={time_offset}s | path={chunk_path}")
+
+            result = await transcribe_audio(chunk_path, vertical_type=vertical_type)
+
+            if result.get("text", "").strip():
+                all_text_parts.append(result["text"].strip())
+
+            # Shift segment timestamps by chunk offset
+            for seg in result.get("segments", []):
+                adjusted = dict(seg)
+                adjusted["start"] = (seg.get("start") or 0) + time_offset
+                adjusted["end"]   = (seg.get("end")   or 0) + time_offset
+                all_segments.append(adjusted)
+
+            # Shift word timestamps by chunk offset
+            for w in result.get("words", []):
+                adjusted = dict(w)
+                adjusted["start"] = (w.get("start") or 0) + time_offset
+                adjusted["end"]   = (w.get("end")   or 0) + time_offset
+                all_words.append(adjusted)
+
+        merged_text = " ".join(all_text_parts)
+        print(f"[Transcribe] Merged: {len(all_text_parts)} part(s), {len(all_segments)} segs, {len(all_words)} words")
+        return {"text": merged_text, "segments": all_segments, "words": all_words}
+
+    finally:
+        # Cleanup preprocessed temp file
+        if preprocessed_created and os.path.exists(processed_path):
+            try:
+                os.remove(processed_path)
+                print(f"[Transcribe] Cleaned preprocessed: {processed_path}")
+            except Exception:
+                pass
+        # Cleanup chunk temp files
+        for cp in chunk_paths_to_cleanup:
+            if cp != processed_path and os.path.exists(cp):
+                try:
+                    os.remove(cp)
+                    print(f"[Transcribe] Cleaned chunk: {cp}")
+                except Exception:
+                    pass
 
 
 # ==================== SPEAKER DIARIZATION ====================
@@ -1462,20 +1638,9 @@ async def process_meeting(meeting_id: str):
         # Resolve vertical early — needed by transcription + diarization
         vertical_type = meeting.get("vertical_type") or "GENERAL"
 
-        # Step 1a: Preprocess audio (ffmpeg normalize + 16kHz WAV)
-        print(f"[Pipeline] Preprocessing audio for meeting {meeting_id}...")
-        processed_audio_path = await preprocess_audio(audio_path)
-
-        # Step 1b: Transcribe — vertical-aware Whisper prompt (TASK 3)
+        # Steps 1a+1b: Preprocess + split if needed + transcribe (TASKS 4+5)
         print(f"[Pipeline] Transcribing meeting {meeting_id} (vertical: {vertical_type})...")
-        transcription = await transcribe_audio(processed_audio_path, vertical_type=vertical_type)
-
-        # Clean up preprocessed temp file if a new one was created
-        if processed_audio_path != audio_path and os.path.exists(processed_audio_path):
-            try:
-                os.remove(processed_audio_path)
-            except Exception:
-                pass
+        transcription = await transcribe_with_chunking(audio_path, vertical_type=vertical_type)
 
         # TASK 6 — Auto-detect vertical when user left default "GENERAL"
         if vertical_type == "GENERAL" and transcription.get("text"):
@@ -1582,6 +1747,22 @@ async def process_meeting(meeting_id: str):
             )
         
         print(f"[GAL] Meeting {meeting_id} processed successfully!")
+
+        # TASK 6 — GDPR: delete raw audio after successful processing
+        if audio_path and os.path.exists(audio_path):
+            try:
+                os.remove(audio_path)
+                await meetings_col.update_one(
+                    {"_id": ObjectId(meeting_id)},
+                    {"$set": {
+                        "audio_path":       None,
+                        "audio_url":        None,
+                        "audio_deleted_at": datetime.now(timezone.utc),
+                    }}
+                )
+                print(f"[GDPR] Audio deleted: {audio_path}")
+            except Exception as gdpr_err:
+                print(f"[GDPR] Could not delete audio {audio_path}: {gdpr_err}")
 
         # Send push notification to user
         meeting_doc = await meetings_col.find_one({"_id": ObjectId(meeting_id)})
@@ -2088,7 +2269,7 @@ ALLOWED_AUDIO_TYPES = {
     "video/mp4",  # some devices send m4a as video/mp4
 }
 ALLOWED_AUDIO_EXTENSIONS = {".m4a", ".mp3", ".wav", ".ogg", ".webm", ".aac", ".flac", ".3gp", ".mp4"}
-MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+MAX_FILE_SIZE = 200 * 1024 * 1024  # 200MB hard limit — backend will chunk anything >20MB for Groq
 
 @app.post("/api/meetings/{meeting_id}/upload")
 async def upload_audio(meeting_id: str, background_tasks: BackgroundTasks, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
@@ -2115,12 +2296,20 @@ async def upload_audio(meeting_id: str, background_tasks: BackgroundTasks, file:
     audio_path = str(UPLOAD_DIR / audio_filename)
 
     content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=413, detail="Fișierul depășește limita de 100MB")
+    file_size_bytes = len(content)
+    file_size_mb = file_size_bytes / (1024 * 1024)
+    print(f"[Upload] Received file: {file.filename}, size={file_size_mb:.1f}MB, type={file.content_type}")
+
+    if file_size_bytes > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Fișierul depășește limita maximă de 200MB ({file_size_mb:.1f}MB primit). "
+                   f"Comprimați înregistrarea sau împărțiți-o în segmente."
+        )
 
     async with aiofiles.open(audio_path, "wb") as f:
         await f.write(content)
-    
+
     file_size = os.path.getsize(audio_path)
     
     # Update meeting with audio info

@@ -5,6 +5,8 @@ interface RecordingContextType {
   setIsRecording: (val: boolean) => void;
   duration: string;
   setDuration: (val: string) => void;
+  durationSeconds: number;
+  setDurationSeconds: (val: number) => void;
   stopRecording: () => void;
   registerStopHandler: (fn: () => void) => void;
 }
@@ -14,6 +16,8 @@ const RecordingContext = createContext<RecordingContextType>({
   setIsRecording: () => {},
   duration: '00:00',
   setDuration: () => {},
+  durationSeconds: 0,
+  setDurationSeconds: () => {},
   stopRecording: () => {},
   registerStopHandler: () => {},
 });
@@ -21,6 +25,7 @@ const RecordingContext = createContext<RecordingContextType>({
 export function RecordingProvider({ children }: { children: React.ReactNode }) {
   const [isRecording, setIsRecording] = useState(false);
   const [duration, setDuration] = useState('00:00');
+  const [durationSeconds, setDurationSeconds] = useState(0);
   const stopHandlerRef = useRef<(() => void) | null>(null);
 
   const registerStopHandler = useCallback((fn: () => void) => {
@@ -38,6 +43,8 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
         setIsRecording,
         duration,
         setDuration,
+        durationSeconds,
+        setDurationSeconds,
         stopRecording,
         registerStopHandler,
       }}
