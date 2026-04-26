@@ -1010,77 +1010,76 @@ async def preprocess_audio(input_path: str) -> str:
 
 
 # ==================== AUDIO SPLITTING ====================
-GROQ_MAX_BYTES = 20 * 1024 * 1024    # 20MB safety margin (Groq hard limit is 25MB)
-CHUNK_DURATION_SECONDS = 600          # 10-minute chunks
+CHUNK_DURATION_SECONDS = 600          # 10 minutes per chunk
+GROQ_CONCURRENCY_LIMIT = 5            # max parallel Groq API calls
 
 
-async def split_audio_if_needed(audio_path: str) -> list:
+async def split_audio_into_chunks(audio_path: str) -> list:
     """
-    TASK 4 — Split audio into ≤10-minute WAV chunks if file exceeds GROQ_MAX_BYTES.
-    Uses ffprobe to get total duration, then ffmpeg segment split.
+    Splits any audio file into fixed 10-minute WAV chunks. Always splits —
+    no size check. Short files produce 1 chunk; long files produce many.
     Returns list of (chunk_path, time_offset_seconds) tuples.
-    If file is within limit, returns [(audio_path, 0.0)] — no split, no copy.
-    All chunk files are written to the same directory as audio_path.
+    All chunk files are tempfile-based — caller must clean them up.
     """
-    file_size = os.path.getsize(audio_path)
-    if file_size <= GROQ_MAX_BYTES:
-        print(f"[Split] {file_size / 1024 / 1024:.1f}MB ≤ 20MB — no split needed")
-        return [(audio_path, 0.0)]
-
-    print(f"[Split] {file_size / 1024 / 1024:.1f}MB > 20MB — splitting into {CHUNK_DURATION_SECONDS}s chunks")
-
-    # Get total duration via ffprobe
+    # Step 1: Get total duration via ffprobe (JSON output)
+    total_duration: float = 0.0
     try:
         proc = await asyncio.create_subprocess_exec(
-            'ffprobe', '-v', 'error',
-            '-show_entries', 'format=duration',
-            '-of', 'default=noprint_wrappers=1:nokey=1',
+            'ffprobe', '-v', 'quiet',
+            '-print_format', 'json',
+            '-show_format',
             audio_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
         stdout, _ = await proc.communicate()
-        total_duration = float(stdout.decode().strip())
-        print(f"[Split] Total duration: {total_duration:.1f}s")
+        duration_data = json.loads(stdout.decode())
+        total_duration = float(duration_data["format"]["duration"])
+        print(f"[Split] Audio duration: {total_duration:.1f}s ({total_duration / 60:.1f} min)")
     except Exception as e:
-        print(f"[Split] ffprobe failed: {e} — transcribing as single file (may hit Groq limit)")
-        return [(audio_path, 0.0)]
+        print(f"[Split] ffprobe failed ({e}) — estimating from file size")
+        file_size = os.path.getsize(audio_path)
+        # Conservative estimate: ~1MB/min for 128kbps m4a
+        total_duration = (file_size / (1024 * 1024)) * 60
+        print(f"[Split] Estimated duration: {total_duration:.1f}s from {file_size / (1024 * 1024):.1f}MB")
 
-    n_chunks = math.ceil(total_duration / CHUNK_DURATION_SECONDS)
-    base = audio_path.rsplit('.', 1)[0]
-    chunks = []
+    num_chunks = max(1, math.ceil(total_duration / CHUNK_DURATION_SECONDS))
+    print(f"[Split] Splitting into {num_chunks} chunk(s) of {CHUNK_DURATION_SECONDS}s")
 
-    for i in range(n_chunks):
-        start = i * CHUNK_DURATION_SECONDS
-        chunk_path = f"{base}_chunk_{i:03d}.wav"
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                'ffmpeg', '-y',
-                '-i', audio_path,
-                '-ss', str(start),
-                '-t', str(CHUNK_DURATION_SECONDS),
-                '-ar', '16000',
-                '-ac', '1',
-                '-f', 'wav',
-                chunk_path,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await proc.wait()
-            if proc.returncode == 0 and os.path.exists(chunk_path):
-                chunk_mb = os.path.getsize(chunk_path) / 1024 / 1024
-                print(f"[Split] Chunk {i + 1}/{n_chunks}: offset={start}s, {chunk_mb:.1f}MB → {chunk_path}")
-                chunks.append((chunk_path, float(start)))
-            else:
-                print(f"[Split] ffmpeg error for chunk {i + 1} (returncode={proc.returncode})")
-        except Exception as e:
-            print(f"[Split] Error creating chunk {i + 1}: {e}")
+    # Step 2: Generate all chunks via ffmpeg
+    chunk_paths = []
+    for i in range(num_chunks):
+        start_time = i * CHUNK_DURATION_SECONDS
+        chunk_path = tempfile.mktemp(suffix=f"_chunk_{i:03d}.wav")
 
-    if not chunks:
-        print("[Split] All chunk attempts failed — falling back to original file")
-        return [(audio_path, 0.0)]
+        proc = await asyncio.create_subprocess_exec(
+            'ffmpeg', '-y',
+            '-i', audio_path,
+            '-ss', str(start_time),
+            '-t', str(CHUNK_DURATION_SECONDS),
+            '-ar', '16000',         # Whisper native sample rate
+            '-ac', '1',             # mono
+            '-c:a', 'pcm_s16le',    # 16-bit PCM WAV
+            chunk_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
 
-    return chunks
+        if proc.returncode == 0 and os.path.exists(chunk_path):
+            chunk_mb = os.path.getsize(chunk_path) / (1024 * 1024)
+            print(f"[Split] Chunk {i + 1}/{num_chunks}: {chunk_mb:.1f}MB (offset: {start_time}s)")
+            chunk_paths.append((chunk_path, float(start_time)))
+        else:
+            err_preview = stderr.decode()[:200] if stderr else "unknown"
+            print(f"[Split] ⚠️ Chunk {i + 1}/{num_chunks} failed: {err_preview}")
+            # Continue — partial transcription > complete failure
+
+    if not chunk_paths:
+        raise RuntimeError(f"Audio splitting failed for all {num_chunks} chunks")
+
+    print(f"[Split] ✅ {len(chunk_paths)}/{num_chunks} chunks ready")
+    return chunk_paths
 
 
 # ==================== AI CLIENTS ====================
@@ -1096,152 +1095,237 @@ anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 # ==================== AI PROCESSING ====================
 async def transcribe_audio(file_path: str, vertical_type: str = "GENERAL") -> dict:
     """
-    TASK 3/5b/5c — Transcribe audio using Groq Whisper (primary) or OpenAI Whisper (fallback).
-    Uses vertical-aware Whisper prompt for domain vocabulary injection.
-    Requests word + segment timestamps; falls back to segment-only if unsupported.
+    Transcribe a single audio chunk via Groq Whisper (primary) or OpenAI (fallback).
+    Retries on rate limit (429) and transient server errors with exponential backoff.
+    Falls back to OpenAI after all Groq retries are exhausted.
     """
-    if groq_client:
-        client = groq_client
-        model = "whisper-large-v3"
-        print("[Transcribe] Using Groq Whisper")
-    elif openai_client:
-        client = openai_client
-        model = "whisper-1"
-        print("[Transcribe] Using OpenAI Whisper")
-    else:
+    if not groq_client and not openai_client:
         raise RuntimeError("Nicio cheie API pentru transcriere configurată (GROQ_API_KEY sau OPENAI_API_KEY)")
 
-    # TASK 3 — vertical-aware Whisper prompt
-    WHISPER_PROMPT = get_whisper_prompt(vertical_type)
-    print(f"[Transcribe] Vertical: {vertical_type} | Prompt: {WHISPER_PROMPT[:60]}...")
+    prompt = get_whisper_prompt(vertical_type)
+    max_retries = 4
 
-    # Try with word + segment timestamps first
-    response = None
-    try:
-        with open(file_path, "rb") as audio_file:
-            response = await client.audio.transcriptions.create(
-                model=model,
-                file=audio_file,
-                response_format="verbose_json",
-                language="ro",
-                prompt=WHISPER_PROMPT,
-                temperature=0.0,
-                timestamp_granularities=["word", "segment"],
-            )
-        print("[Transcribe] Word-level timestamps requested")
-    except Exception:
-        # Fallback: segment timestamps only
-        print("[Transcribe] Word timestamps not supported — falling back to segment-only")
-        with open(file_path, "rb") as audio_file:
-            response = await client.audio.transcriptions.create(
-                model=model,
-                file=audio_file,
-                response_format="verbose_json",
-                language="ro",
-                prompt=WHISPER_PROMPT,
-                temperature=0.0,
-            )
+    for attempt in range(max_retries):
+        try:
+            client = groq_client or openai_client
+            model = "whisper-large-v3" if groq_client else "whisper-1"
 
-    transcript_text = response.text
-    segments = []
-    words = []
+            with open(file_path, "rb") as f:
+                try:
+                    response = await client.audio.transcriptions.create(
+                        model=model,
+                        file=f,
+                        response_format="verbose_json",
+                        language="ro",
+                        prompt=prompt,
+                        temperature=0.0,
+                        timestamp_granularities=["word", "segment"],
+                    )
+                except Exception as ts_err:
+                    if "timestamp_granularities" in str(ts_err):
+                        f.seek(0)
+                        response = await client.audio.transcriptions.create(
+                            model=model,
+                            file=f,
+                            response_format="verbose_json",
+                            language="ro",
+                            prompt=prompt,
+                            temperature=0.0,
+                        )
+                    else:
+                        raise
 
-    if hasattr(response, 'segments') and response.segments:
-        for seg in response.segments:
-            if isinstance(seg, dict):
-                segments.append(seg)
-            else:
-                segments.append({
-                    "start": getattr(seg, 'start', 0),
-                    "end":   getattr(seg, 'end', 0),
-                    "text":  getattr(seg, 'text', ''),
-                })
+            # Parse response
+            transcript_text = response.text or ""
+            segments = []
+            words = []
 
-    # Extract word-level timestamps when available (TASK 5c)
-    if hasattr(response, 'words') and response.words:
-        for w in response.words:
-            if isinstance(w, dict):
-                words.append(w)
-            else:
-                words.append({
-                    "start": getattr(w, 'start', 0),
-                    "end":   getattr(w, 'end', 0),
-                    "word":  getattr(w, 'word', ''),
-                })
-        print(f"[Transcribe] Got {len(words)} word-level timestamps")
+            if hasattr(response, "segments") and response.segments:
+                for seg in response.segments:
+                    segments.append(seg if isinstance(seg, dict) else {
+                        "start": getattr(seg, "start", 0),
+                        "end":   getattr(seg, "end", 0),
+                        "text":  getattr(seg, "text", "").strip(),
+                    })
 
-    return {"text": transcript_text, "segments": segments, "words": words}
+            if hasattr(response, "words") and response.words:
+                for w in response.words:
+                    words.append(w if isinstance(w, dict) else {
+                        "word":  getattr(w, "word", ""),
+                        "start": getattr(w, "start", 0),
+                        "end":   getattr(w, "end", 0),
+                    })
+                print(f"[Transcribe] {len(words)} word-level timestamps")
+
+            return {"text": transcript_text, "segments": segments, "words": words}
+
+        except Exception as e:
+            err_str = str(e)
+            is_rate_limit = "429" in err_str or "rate_limit" in err_str.lower()
+            is_server_err = any(code in err_str for code in ["500", "502", "503", "529"])
+
+            if attempt < max_retries - 1 and (is_rate_limit or is_server_err):
+                wait = (2 ** attempt) + (1 if is_rate_limit else 0)
+                label = "rate limit" if is_rate_limit else "server error"
+                print(f"[Transcribe] Attempt {attempt + 1} failed ({label}), retrying in {wait}s...")
+                await asyncio.sleep(wait)
+                continue
+
+            # Last attempt — try OpenAI fallback if Groq was primary
+            if groq_client and openai_client and attempt == max_retries - 1:
+                print(f"[Transcribe] Groq exhausted after {max_retries} attempts — trying OpenAI fallback")
+                try:
+                    with open(file_path, "rb") as f:
+                        fb_response = await openai_client.audio.transcriptions.create(
+                            model="whisper-1",
+                            file=f,
+                            response_format="verbose_json",
+                            language="ro",
+                            prompt=prompt,
+                            temperature=0.0,
+                        )
+                    return {"text": fb_response.text or "", "segments": [], "words": []}
+                except Exception as fb_err:
+                    print(f"[Transcribe] OpenAI fallback failed: {fb_err}")
+
+            raise
+
+
+async def transcribe_chunk(
+    chunk_path: str,
+    time_offset: float,
+    vertical_type: str,
+    semaphore: asyncio.Semaphore,
+    chunk_index: int,
+    total_chunks: int,
+) -> dict:
+    """
+    Transcribes one chunk under semaphore-controlled concurrency.
+    Applies time_offset to all segment/word timestamps.
+    Never raises — returns {success: False} on any error so gather() keeps running.
+    """
+    async with semaphore:
+        print(f"[Transcribe] Starting chunk {chunk_index + 1}/{total_chunks} (offset: {time_offset:.0f}s)")
+        try:
+            result = await transcribe_audio(chunk_path, vertical_type=vertical_type)
+
+            offset_segments = [
+                {**seg,
+                 "start": seg.get("start", 0) + time_offset,
+                 "end":   seg.get("end",   0) + time_offset}
+                for seg in result.get("segments", [])
+            ]
+            offset_words = [
+                {**w,
+                 "start": w.get("start", 0) + time_offset,
+                 "end":   w.get("end",   0) + time_offset}
+                for w in result.get("words", [])
+            ]
+
+            text = result.get("text", "").strip()
+            print(f"[Transcribe] ✅ Chunk {chunk_index + 1}/{total_chunks}: {len(text)} chars")
+            return {
+                "text":     text,
+                "segments": offset_segments,
+                "words":    offset_words,
+                "offset":   time_offset,
+                "success":  True,
+            }
+
+        except Exception as e:
+            print(f"[Transcribe] ⚠️ Chunk {chunk_index + 1}/{total_chunks} failed: {e}")
+            return {
+                "text":     "",
+                "segments": [],
+                "words":    [],
+                "offset":   time_offset,
+                "success":  False,
+            }
 
 
 async def transcribe_with_chunking(audio_path: str, vertical_type: str = "GENERAL") -> dict:
     """
-    TASK 5 — Full transcription orchestrator:
-      preprocess (ffmpeg 16kHz mono) → split if >20MB → transcribe each chunk →
-      merge text/segments/words with offset timestamps → cleanup all temp files.
-    Returns merged {text, segments, words} dict identical in shape to transcribe_audio().
+    Main transcription orchestrator — handles any file size, any duration.
+    Pipeline: preprocess (16kHz mono) → always-split into 10-min chunks →
+              parallel transcription (≤5 concurrent Groq calls) →
+              merge with correct timestamps → cleanup all temp files.
+    Returns {text, segments, words, chunks_total, chunks_succeeded}.
     """
-    # Step 1: Normalize audio
-    processed_path = await preprocess_audio(audio_path)
-    preprocessed_created = (processed_path != audio_path)
-    chunk_paths_to_cleanup = []
+    temp_files: list = []
 
     try:
-        # Step 2: Split if needed
-        chunks = await split_audio_if_needed(processed_path)
-        is_split = len(chunks) > 1
+        # Step 1: Normalize audio (16kHz mono WAV, loudnorm)
+        preprocessed_path = await preprocess_audio(audio_path)
+        if preprocessed_path != audio_path:
+            temp_files.append(preprocessed_path)
 
-        # Track which temp files to delete (only chunk files, not the preprocessed file itself)
-        if is_split:
-            chunk_paths_to_cleanup = [p for p, _ in chunks]
+        # Step 2: Always split into fixed chunks
+        chunks = await split_audio_into_chunks(preprocessed_path)
+        for chunk_path, _ in chunks:
+            temp_files.append(chunk_path)
 
-        # Step 3: Transcribe each chunk, merge results
-        all_text_parts: list = []
-        all_segments: list = []
-        all_words: list = []
+        total_chunks = len(chunks)
+        print(f"[Pipeline] Transcribing {total_chunks} chunk(s) in parallel (max {GROQ_CONCURRENCY_LIMIT} concurrent)")
 
-        for idx, (chunk_path, time_offset) in enumerate(chunks):
-            label = f"chunk {idx + 1}/{len(chunks)}" if is_split else "full file"
-            print(f"[Transcribe] {label} | offset={time_offset}s | path={chunk_path}")
+        # Step 3: Parallel transcription with semaphore rate-limit guard
+        semaphore = asyncio.Semaphore(GROQ_CONCURRENCY_LIMIT)
+        tasks = [
+            transcribe_chunk(
+                chunk_path=chunk_path,
+                time_offset=time_offset,
+                vertical_type=vertical_type,
+                semaphore=semaphore,
+                chunk_index=i,
+                total_chunks=total_chunks,
+            )
+            for i, (chunk_path, time_offset) in enumerate(chunks)
+        ]
+        chunk_results = await asyncio.gather(*tasks)
 
-            result = await transcribe_audio(chunk_path, vertical_type=vertical_type)
+        # Step 4: Sort by offset (gather doesn't guarantee ordering)
+        chunk_results = sorted(chunk_results, key=lambda r: r["offset"])
 
-            if result.get("text", "").strip():
-                all_text_parts.append(result["text"].strip())
+        # Step 5: Merge
+        successful = [r for r in chunk_results if r["success"]]
+        failed_count = total_chunks - len(successful)
 
-            # Shift segment timestamps by chunk offset
-            for seg in result.get("segments", []):
-                adjusted = dict(seg)
-                adjusted["start"] = (seg.get("start") or 0) + time_offset
-                adjusted["end"]   = (seg.get("end")   or 0) + time_offset
-                all_segments.append(adjusted)
+        if not successful:
+            raise RuntimeError("All audio chunks failed transcription — check Groq API key and limits")
 
-            # Shift word timestamps by chunk offset
-            for w in result.get("words", []):
-                adjusted = dict(w)
-                adjusted["start"] = (w.get("start") or 0) + time_offset
-                adjusted["end"]   = (w.get("end")   or 0) + time_offset
-                all_words.append(adjusted)
+        if failed_count > 0:
+            print(f"[Pipeline] ⚠️ {failed_count}/{total_chunks} chunks failed — partial transcription")
 
-        merged_text = " ".join(all_text_parts)
-        print(f"[Transcribe] Merged: {len(all_text_parts)} part(s), {len(all_segments)} segs, {len(all_words)} words")
-        return {"text": merged_text, "segments": all_segments, "words": all_words}
+        merged_text = " ".join(r["text"] for r in successful if r["text"])
+        merged_segments = sorted(
+            [seg for r in successful for seg in r["segments"]],
+            key=lambda s: s.get("start", 0),
+        )
+        merged_words = sorted(
+            [w for r in successful for w in r["words"]],
+            key=lambda w: w.get("start", 0),
+        )
+
+        print(
+            f"[Pipeline] ✅ Transcription complete: {len(merged_text)} chars, "
+            f"{len(merged_segments)} segments, {len(merged_words)} words — "
+            f"{len(successful)}/{total_chunks} chunks succeeded"
+        )
+        return {
+            "text":               merged_text,
+            "segments":           merged_segments,
+            "words":              merged_words,
+            "chunks_total":       total_chunks,
+            "chunks_succeeded":   len(successful),
+        }
 
     finally:
-        # Cleanup preprocessed temp file
-        if preprocessed_created and os.path.exists(processed_path):
+        # Clean up all temp files regardless of success/failure
+        for path in temp_files:
             try:
-                os.remove(processed_path)
-                print(f"[Transcribe] Cleaned preprocessed: {processed_path}")
+                if path and os.path.exists(path):
+                    os.unlink(path)
             except Exception:
                 pass
-        # Cleanup chunk temp files
-        for cp in chunk_paths_to_cleanup:
-            if cp != processed_path and os.path.exists(cp):
-                try:
-                    os.remove(cp)
-                    print(f"[Transcribe] Cleaned chunk: {cp}")
-                except Exception:
-                    pass
 
 
 # ==================== SPEAKER DIARIZATION ====================
@@ -1638,11 +1722,20 @@ async def process_meeting(meeting_id: str):
         # Resolve vertical early — needed by transcription + diarization
         vertical_type = meeting.get("vertical_type") or "GENERAL"
 
-        # Steps 1a+1b: Preprocess + split if needed + transcribe (TASKS 4+5)
+        # Preprocess + always-split + parallel transcribe
         print(f"[Pipeline] Transcribing meeting {meeting_id} (vertical: {vertical_type})...")
         transcription = await transcribe_with_chunking(audio_path, vertical_type=vertical_type)
 
-        # TASK 6 — Auto-detect vertical when user left default "GENERAL"
+        # TASK 3 — Persist chunk processing metadata for production monitoring
+        await meetings_col.update_one(
+            {"_id": ObjectId(meeting_id)},
+            {"$set": {
+                "processing_chunks_total":     transcription.get("chunks_total", 1),
+                "processing_chunks_succeeded": transcription.get("chunks_succeeded", 1),
+            }}
+        )
+
+        # Auto-detect vertical when user left default "GENERAL"
         if vertical_type == "GENERAL" and transcription.get("text"):
             detected = await detect_vertical(transcription["text"][:1500])
             if detected != "GENERAL":

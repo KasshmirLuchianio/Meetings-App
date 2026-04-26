@@ -30,14 +30,13 @@ export default function AudioRecorder({ onRecordingComplete }: RecorderProps) {
     registerStopHandler,
   } = useRecording();
 
-  // Duration thresholds
-  const WARNING_THRESHOLD_SECONDS = 20 * 60;  // 20 min — first warning
-  const SOFT_LIMIT_SECONDS = 25 * 60;         // 25 min — strong warning (Groq limit zone)
-  const HARD_LIMIT_SECONDS = 120 * 60;        // 120 min — auto-stop
+  // Duration thresholds — informational only, no auto-stop ever
+  const WARNING_THRESHOLD_SECONDS = 20 * 60;  // 20 min — gentle note
+  const INFO_THRESHOLD_SECONDS = 60 * 60;     // 60 min — reassure user about chunking
 
-  // One-time warning flags (reset on each new recording)
+  // One-time notification flags (reset on each new recording)
   const warned20Ref = useRef(false);
-  const warned25Ref = useRef(false);
+  const warnedInfoRef = useRef(false);
 
   // Stable ref to stopRecording so the interval closure can always call the latest version
   const stopRecordingRef = useRef<(() => Promise<void>) | null>(null);
@@ -184,7 +183,7 @@ export default function AudioRecorder({ onRecordingComplete }: RecorderProps) {
       recordingRef.current = newRecording;
       durationSecondsRef.current = 0;
       warned20Ref.current = false;
-      warned25Ref.current = false;
+      warnedInfoRef.current = false;
       setDuration('00:00');
       setDurationSeconds(0);
       setIsRecording(true);
@@ -197,37 +196,22 @@ export default function AudioRecorder({ onRecordingComplete }: RecorderProps) {
         setDuration(formatDuration(secs));
         setDurationSeconds(secs);
 
-        // ── HARD LIMIT: auto-stop at 2 hours ──────────────────────────
-        if (secs >= HARD_LIMIT_SECONDS) {
-          if (timerRef.current) {
-            clearInterval(timerRef.current);
-            timerRef.current = null;
-          }
+        // ── 60 min: reassure user that chunking handles everything ────
+        if (secs === INFO_THRESHOLD_SECONDS && !warnedInfoRef.current) {
+          warnedInfoRef.current = true;
           Alert.alert(
-            'Înregistrare oprită automat',
-            'Limita maximă de 2 ore a fost atinsă. Înregistrarea va fi salvată acum.',
-            [{ text: 'OK' }]
-          );
-          stopRecordingRef.current?.();
-          return;
-        }
-
-        // ── SOFT LIMIT: strong warning at 25 min (Groq 25 MB zone) ────
-        if (secs === SOFT_LIMIT_SECONDS && !warned25Ref.current) {
-          warned25Ref.current = true;
-          Alert.alert(
-            '⚠️ Înregistrare lungă',
-            'Ai depășit 25 de minute. Fișierul este mare — va fi procesat automat în segmente.\n\nPoți continua sau opri înregistrarea.',
+            'Înregistrare lungă',
+            'Înregistrarea durează deja o oră — totul e în regulă.\n\nFișierul va fi procesat automat în segmente. Poți continua oricât.',
             [{ text: 'Continuă' }]
           );
         }
 
-        // ── WARNING: first alert at 20 min ────────────────────────────
+        // ── 20 min: gentle first note ─────────────────────────────────
         if (secs === WARNING_THRESHOLD_SECONDS && !warned20Ref.current) {
           warned20Ref.current = true;
           Alert.alert(
-            'Atenție: 20 de minute',
-            'Înregistrarea durează deja 20 de minute.\n\nFișierele mai mari de 25 min sunt procesate în segmente automat.',
+            '20 de minute',
+            'Înregistrarea durează deja 20 de minute.\n\nPoți continua — fișierele lungi sunt procesate automat în segmente.',
             [{ text: 'OK' }]
           );
         }

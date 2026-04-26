@@ -3,8 +3,8 @@ import { View, Text, StyleSheet, TouchableOpacity, Animated, Easing } from 'reac
 import RecordingOrb from './RecordingOrb';
 import { useRecording } from '../context/RecordingContext';
 
-const WARNING_THRESHOLD_SECONDS = 20 * 60;
-const SOFT_LIMIT_SECONDS = 25 * 60;
+const WARNING_THRESHOLD_SECONDS = 20 * 60;   // gentle orange tint at 20 min
+const INFO_THRESHOLD_SECONDS = 60 * 60;      // reassuring info note at 60 min
 
 export default function RecordingScreen() {
   const { isRecording, duration, durationSeconds, stopRecording } = useRecording();
@@ -29,14 +29,13 @@ export default function RecordingScreen() {
         <RecordingOrb isRecording={isRecording} />
         <Text style={[
           styles.timer,
-          durationSeconds >= SOFT_LIMIT_SECONDS && styles.timerWarnRed,
-          durationSeconds >= WARNING_THRESHOLD_SECONDS && durationSeconds < SOFT_LIMIT_SECONDS && styles.timerWarnOrange,
+          durationSeconds >= WARNING_THRESHOLD_SECONDS && durationSeconds < INFO_THRESHOLD_SECONDS && styles.timerWarnOrange,
         ]}>{duration}</Text>
 
-        {durationSeconds >= SOFT_LIMIT_SECONDS ? (
-          <Text style={styles.warningRed}>Fișier mare — procesare în segmente</Text>
+        {durationSeconds >= INFO_THRESHOLD_SECONDS ? (
+          <Text style={styles.infoNote}>Înregistrare lungă — va fi procesată automat în segmente ✓</Text>
         ) : durationSeconds >= WARNING_THRESHOLD_SECONDS ? (
-          <Text style={styles.warningOrange}>Înregistrare lungă — aproape de limită</Text>
+          <Text style={styles.warningOrange}>Înregistrare lungă — continuă fără griji</Text>
         ) : (
           <Text style={styles.hint}>Vorbește clar și natural</Text>
         )}
@@ -78,9 +77,6 @@ const styles = StyleSheet.create({
   timerWarnOrange: {
     color: '#FB923C',
   },
-  timerWarnRed: {
-    color: '#F87171',
-  },
   hint: {
     fontSize: 14,
     color: 'rgba(250,248,243,0.4)',
@@ -92,9 +88,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textAlign: 'center',
   },
-  warningRed: {
+  infoNote: {
     fontSize: 13,
-    color: '#F87171',
+    color: 'rgba(250,248,243,0.55)',
     letterSpacing: 0.5,
     textAlign: 'center',
   },
