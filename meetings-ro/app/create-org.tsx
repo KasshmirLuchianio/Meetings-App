@@ -10,6 +10,7 @@ import { ArrowLeft, Building2 } from 'lucide-react-native';
 import { COLORS } from '../src/constants/theme';
 import { API_BASE_URL } from '../src/constants/config';
 import { authenticatedFetch } from '../src/utils/authenticatedFetch';
+import { useAuth } from '../src/context/AuthContext';
 
 const ORG_TYPES = [
   { id: 'primarie', label: '🏛️ Primărie / Consiliu' },
@@ -33,6 +34,7 @@ const VERTICALS = [
 export default function CreateOrgScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { refreshUser } = useAuth();
   const [name, setName] = useState('');
   const [type, setType] = useState('primarie');
   const [vertical, setVertical] = useState('GENERAL');
@@ -54,6 +56,9 @@ export default function CreateOrgScreen() {
       const data = await res.json();
       if (res.ok) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        // Re-fetch /api/auth/me so user.tenant_id is populated in context
+        // before navigating — this makes the SlideDrawer show "Echipa mea" immediately
+        await refreshUser();
         Alert.alert(
           '✓ Organizație creată',
           `„${name}" a fost creată. Ești acum administrator.`,

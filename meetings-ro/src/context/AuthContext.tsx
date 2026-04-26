@@ -15,6 +15,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   updatePlan: (plan: PricingTier) => void;
   refreshUsage: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -27,6 +28,7 @@ const AuthContext = createContext<AuthContextType>({
   logout: async () => {},
   updatePlan: () => {},
   refreshUsage: async () => {},
+  refreshUser: async () => {},
 });
 
 const TOKEN_KEY = 'auth_token';
@@ -164,6 +166,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const refreshUser = async () => {
+    if (!authToken) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user);
+        await AsyncStorage.setItem(USER_KEY, JSON.stringify(data.user));
+      }
+    } catch {
+      // Silent fail — caller handles navigation regardless
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -176,6 +194,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logout,
         updatePlan,
         refreshUsage,
+        refreshUser,
       }}
     >
       {children}

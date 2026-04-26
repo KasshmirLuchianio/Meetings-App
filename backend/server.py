@@ -541,6 +541,8 @@ async def auth_me(user: dict = Depends(get_current_user)):
             "plan": user.get("plan", "FREE"),
             "meetings_used_this_month": user.get("meetings_used_this_month", 0),
             "created_at": user["created_at"].isoformat() if isinstance(user.get("created_at"), datetime) else str(user.get("created_at", "")),
+            "tenant_id": user.get("tenant_id"),   # org membership — drives SlideDrawer menu
+            "role": user.get("role"),              # admin / member — drives Admin badge
         }
     }
 
