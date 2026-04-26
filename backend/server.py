@@ -1616,19 +1616,23 @@ async def diarize_transcript(
     return await _diarize_with_claude_nlp(segments, segments_text, vertical_type=vertical_type)
 
 
+# NOTE: personal_legal is intentionally excluded from auto-detection.
+# Users must select it manually. This vertical produces verbatim transcripts
+# intended for legal use — auto-assignment without user consent is a liability risk.
 async def detect_vertical(transcript_sample: str) -> str:
     """
     TASK 6 — Auto-detect the most appropriate vertical from transcript text.
     Uses claude-haiku-4-5 (cheap, max_tokens=50) for speed and cost efficiency.
     Called only when the user left vertical_type as "GENERAL".
     Returns one of the registered vertical_type keys, or "GENERAL" on failure.
+    PERSONAL_LEGAL is excluded — it must be selected explicitly by the user.
     """
     if not transcript_sample or not transcript_sample.strip():
         return "GENERAL"
 
     VALID_VERTICALS = {
         "GAL", "LEGAL", "HEALTHCARE", "BANKING",
-        "JOURNALISM", "STARTUPS", "PERSONAL_LEGAL", "SOLO_READING", "GENERAL",
+        "JOURNALISM", "STARTUPS", "SOLO_READING", "GENERAL",
     }
 
     try:
@@ -1639,7 +1643,7 @@ async def detect_vertical(transcript_sample: str) -> str:
                 "Clasifică textul într-una din categorii. "
                 "Răspunde DOAR cu una din (exact, fără alte cuvinte): "
                 "GAL, LEGAL, HEALTHCARE, BANKING, JOURNALISM, STARTUPS, "
-                "PERSONAL_LEGAL, SOLO_READING, GENERAL."
+                "SOLO_READING, GENERAL."
             ),
             messages=[{
                 "role": "user",
