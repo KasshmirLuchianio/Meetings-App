@@ -14,12 +14,12 @@
       "backgroundColor": "#FAF8F3"
     },
     "ios": {
-      "bundleIdentifier": "ro.meetings.app",
+      "bundleIdentifier": "app.meetingsro.meetings",
       "buildNumber": "1",
       "minimumOsVersion": "13.0",
       "supportsTablet": false,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Meetings.ro necesită acces la microfon pentru înregistrarea ședințelor.",
+        "NSMicrophoneUsageDescription": "Aplicația necesită acces la microfon pentru a înregistra ședințele.",
         "ITSAppUsesNonExemptEncryption": false
       },
       "privacyManifests": {
@@ -29,25 +29,32 @@
             "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeEmailAddress",
             "NSPrivacyCollectedDataTypeLinked": true,
             "NSPrivacyCollectedDataTypeTracking": false,
-            "NSPrivacyCollectedDataTypePurposes": ["NSPrivacyCollectedDataTypePurposeAppFunctionality"]
+            "NSPrivacyCollectedDataTypePurposes": [
+              "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+            ]
           },
           {
             "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeAudioData",
             "NSPrivacyCollectedDataTypeLinked": true,
             "NSPrivacyCollectedDataTypeTracking": false,
-            "NSPrivacyCollectedDataTypePurposes": ["NSPrivacyCollectedDataTypePurposeAppFunctionality"]
+            "NSPrivacyCollectedDataTypePurposes": [
+              "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+            ]
           }
         ]
       }
     },
     "android": {
-      "package": "ro.meetings.app",
+      "package": "app.meetingsro.meetings",
       "versionCode": 1,
       "targetSdkVersion": 34,
       "permissions": [
         "RECORD_AUDIO",
         "INTERNET",
-        "VIBRATE"
+        "VIBRATE",
+        "READ_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -64,14 +71,18 @@
       [
         "expo-av",
         {
-          "microphonePermission": "Meetings.ro necesită acces la microfon pentru înregistrarea ședințelor."
+          "microphonePermission": "Aplicația necesită acces la microfon pentru a înregistra ședințele."
         }
       ]
     ],
     "extra": {
       "router": {
         "origin": false
+      },
+      "eas": {
+        "projectId": "a131ab85-ddfc-4337-9a8b-ee3ce6f7224a"
       }
-    }
+    },
+    "owner": "vladgrigorov"
   }
 }
