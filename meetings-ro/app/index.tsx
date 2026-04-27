@@ -20,7 +20,7 @@ export default function HomeScreen() {
   const [activeTab, setActiveTab] = useState<'record' | 'upload'>('record');
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [limitMessage, setLimitMessage] = useState('');
-  const [usageData, setUsageData] = useState<{ used: number; limit: number; percentage: number } | null>(null);
+  const [usageData, setUsageData] = useState<{ used: number; limit: number; percentage: number; remaining: number } | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -31,9 +31,10 @@ export default function HomeScreen() {
       if (res.ok) {
         const data = await res.json();
         setUsageData({
-          used: data.meetings_used,
-          limit: data.meetings_limit,
+          used:       data.minutes_used,
+          limit:      data.minutes_limit,
           percentage: data.percentage,
+          remaining:  data.minutes_remaining,
         });
       }
     } catch {}
@@ -57,7 +58,7 @@ export default function HomeScreen() {
   // Fetch real usage data from backend
   useEffect(() => {
     loadUsageData();
-  }, [token, user?.meetings_used_this_month]);
+  }, [token, user?.minutes_used_this_month]);
 
   if (isLoading) {
     return (
@@ -72,11 +73,11 @@ export default function HomeScreen() {
   }
 
   const currentPlan = PRICING_PLANS.find((p) => p.tier === user?.plan) || PRICING_PLANS[0];
-  const used = usageData?.used ?? (user?.meetings_used_this_month || 0);
-  const limit = usageData?.limit ?? currentPlan.meetings_limit;
-  const isUnlimited = limit === -1;
-  const meetingsLeft = isUnlimited ? null : limit - used;
-  const usagePercent = isUnlimited ? 0 : (limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0);
+  const usedMinutes = Math.floor(usageData?.used ?? user?.minutes_used_this_month ?? 0);
+  const limitMinutes = usageData?.limit ?? user?.minutes_limit_this_month ?? currentPlan.minutes_limit;
+  const isUnlimited = user?.plan === 'ENTERPRISE' || limitMinutes >= 99999;
+  const remainingMinutes = isUnlimited ? null : Math.max(0, limitMinutes - usedMinutes);
+  const usagePercent = isUnlimited ? 0 : (limitMinutes > 0 ? Math.min(100, Math.round((usedMinutes / limitMinutes) * 100)) : 0);
   const usageColor = usagePercent >= 100 ? '#EF4444' : usagePercent >= 80 ? '#F59E0B' : '#22C55E';
 
   const handleRecordingComplete = async (uri: string, duration: number) => {
@@ -86,14 +87,6 @@ export default function HomeScreen() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ vertical_type: 'GENERAL' }),
       });
-      if (createRes.status === 402) {
-        const err = await createRes.json().catch(() => ({ limit: 0, plan: 'free' }));
-        setLimitMessage(
-          `Ai folosit toate cele ${err.limit} înregistrări din planul ${(err.plan || 'FREE').toUpperCase()}. Upgradează pentru a continua.`
-        );
-        setShowLimitModal(true);
-        return;
-      }
       if (!createRes.ok) {
         const errBody = await createRes.json().catch(() => ({ detail: `Eroare server (${createRes.status})` }));
         throw new Error(errBody.detail || `Eroare la creare meeting (${createRes.status})`);
@@ -111,6 +104,16 @@ export default function HomeScreen() {
         method: 'POST',
         body: formData,
       });
+      // Plan-quota limit hit at upload time (minute-based)
+      if (uploadRes.status === 403) {
+        const err = await uploadRes.json().catch(() => ({}));
+        const detail = err?.detail || {};
+        if (detail?.error === 'plan_limit_reached') {
+          setLimitMessage(detail.message || 'Ai atins limita de minute disponibile.');
+          setShowLimitModal(true);
+          return;
+        }
+      }
       if (!uploadRes.ok) {
         const errBody = await uploadRes.json().catch(() => ({ detail: `Upload eșuat (${uploadRes.status})` }));
         throw new Error(errBody.detail || `Upload eșuat (${uploadRes.status})`);
@@ -163,8 +166,8 @@ export default function HomeScreen() {
                 <Text className="text-navy font-heading text-sm">{currentPlan.name}</Text>
                 <Text className="text-gray-500 font-body text-xs">
                   {isUnlimited
-                    ? 'Întâlniri nelimitate'
-                    : `${used}/${limit} întâlniri folosite`}
+                    ? 'Nelimitat'
+                    : `${usedMinutes} / ${limitMinutes} minute folosite`}
                 </Text>
               </View>
             </View>
@@ -190,10 +193,12 @@ export default function HomeScreen() {
                 />
               </View>
               <Text className="text-xs font-body mt-1.5" style={{ color: usageColor }}>
-                {meetingsLeft !== null && meetingsLeft > 0
-                  ? `${meetingsLeft} întâlniri rămase`
-                  : meetingsLeft === 0
-                  ? 'Limita atinsă — fă upgrade!'
+                {usagePercent >= 100
+                  ? 'Limita atinsă — upgrade pentru a continua'
+                  : usagePercent >= 80 && remainingMinutes !== null
+                  ? `Mai ai ${remainingMinutes} minute disponibile`
+                  : remainingMinutes !== null
+                  ? `${remainingMinutes} minute rămase`
                   : ''}
               </Text>
             </View>

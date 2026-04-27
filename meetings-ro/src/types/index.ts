@@ -13,7 +13,7 @@ export interface PricingPlan {
   price_monthly: number;
   price_yearly: number;
   audio_hours: number;
-  meetings_limit: number;
+  minutes_limit: number;   // monthly minute quota (-1 / large number = unlimited)
   features: string[];
   highlight?: boolean;
 }
@@ -25,7 +25,8 @@ export interface User {
   name: string;
   company?: string;
   plan: PricingTier;
-  meetings_used_this_month: number;
+  minutes_used_this_month: number;
+  minutes_limit_this_month: number;
   created_at: string;
   // Enterprise / RBAC fields
   role?: UserRole;

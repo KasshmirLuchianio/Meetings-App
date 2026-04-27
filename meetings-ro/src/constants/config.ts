@@ -36,22 +36,23 @@ export const VERTICAL_TYPES = {
   STARTUPS: 'STARTUPS',
 } as const;
 
-// Pricing plans
+// Pricing plans — minute-based quota. Server-side keys: starter / pro / enterprise.
+// Tier (FREE/PRO/ENTERPRISE) is the legacy DB string. minutes_limit must match
+// backend PLAN_LIMITS in server.py.
 export const PRICING_PLANS = [
   {
-    id: "free",
+    id: "starter",
     tier: 'FREE' as const,
     name: 'Starter',
     price_monthly: 0,
     price_yearly: 0,
-    audio_hours: 10,
-    meetings_limit: 5,
+    audio_hours: 0.25,
+    minutes_limit: 15,
     features: [
-      '5 întâlniri / lună',
-      '10 ore audio / lună',
+      '15 minute / lună',
+      'Transcriere AI',
       '2 verticale disponibile',
       'Export PDF',
-      'Transcriere AI',
     ],
   },
   {
@@ -60,11 +61,10 @@ export const PRICING_PLANS = [
     name: 'Pro',
     price_monthly: 19,
     price_yearly: 182,
-    audio_hours: 30,
-    meetings_limit: 100,
+    audio_hours: 5,
+    minutes_limit: 300,
     features: [
-      '100 întâlniri / lună',
-      '30 ore audio / lună',
+      '5 ore (300 min) / lună',
       'Toate verticalele',
       'Export PDF + DOCX',
       'Transcriere AI avansată',
@@ -79,10 +79,9 @@ export const PRICING_PLANS = [
     price_monthly: 99,
     price_yearly: 950,
     audio_hours: -1,
-    meetings_limit: -1,
+    minutes_limit: 99999,
     features: [
-      'Întâlniri nelimitate',
-      'Audio nelimitat',
+      'Minute nelimitate',
       'Toate verticalele',
       'Export PDF + DOCX + API',
       'AI personalizat pe domeniu',

@@ -156,7 +156,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (res.ok) {
         const data = await res.json();
         if (user) {
-          const updated = { ...user, meetings_used_this_month: data.meetings_used, plan: data.plan };
+          const updated = {
+            ...user,
+            minutes_used_this_month:  data.minutes_used,
+            minutes_limit_this_month: data.minutes_limit,
+            plan: data.plan,
+          };
           setUser(updated);
           await AsyncStorage.setItem(USER_KEY, JSON.stringify(updated));
         }

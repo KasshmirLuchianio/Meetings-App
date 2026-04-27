@@ -131,11 +131,28 @@ JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 72  # 3 days
 
 # ==================== PLAN LIMITS ====================
+# Minute-based monthly quota. Stored plan strings in DB are uppercase
+# ("FREE"/"PRO"/"ENTERPRISE") for legacy reasons — normalize_plan() maps them
+# to the lowercase keys used here.
 PLAN_LIMITS = {
-    "free": 5,
-    "pro": 100,
-    "enterprise": -1,
+    "starter":    {"minutes": 15,    "label": "15 minute/lună"},
+    "pro":        {"minutes": 300,   "label": "5 ore/lună"},
+    "enterprise": {"minutes": 99999, "label": "Nelimitat"},
 }
+
+
+def normalize_plan(plan: str) -> str:
+    """Map DB plan names (FREE/PRO/ENTERPRISE) to PLAN_LIMITS keys."""
+    if not plan:
+        return "starter"
+    p = str(plan).strip().lower()
+    if p in ("free", "starter"):
+        return "starter"
+    if p == "pro":
+        return "pro"
+    if p == "enterprise":
+        return "enterprise"
+    return "starter"
 
 # ==================== DATABASE ====================
 client = AsyncIOMotorClient(MONGO_URL)
@@ -254,40 +271,27 @@ def require_role(*allowed_roles: str):
 
 # ==================== PLAN LIMIT HELPERS ====================
 async def reset_monthly_if_needed(user: dict) -> dict:
-    """Reset meetings_used_this_month if we're in a new month."""
+    """Reset minutes_used_this_month if we're in a new month (defensive — the
+    monthly_usage_reset_job task is the canonical reset, this is a safety net
+    in case the server was offline at the rollover moment)."""
     last_reset = user.get("last_monthly_reset")
     now = datetime.now(timezone.utc)
     if last_reset is None or (isinstance(last_reset, datetime) and (last_reset.month != now.month or last_reset.year != now.year)):
         await users_col.update_one(
             {"_id": user["_id"]},
-            {"$set": {"meetings_used_this_month": 0, "last_monthly_reset": now}}
+            {"$set": {"minutes_used_this_month": 0.0, "last_monthly_reset": now}}
         )
-        user["meetings_used_this_month"] = 0
+        user["minutes_used_this_month"] = 0.0
         user["last_monthly_reset"] = now
     return user
 
 
-async def check_plan_limit(user: dict):
-    """Check if user has reached their plan limit. Raises 402 if exceeded."""
-    user = await reset_monthly_if_needed(user)
-    plan = user.get("plan", "FREE").lower()
-    limit = PLAN_LIMITS.get(plan, PLAN_LIMITS["free"])
-    if limit == -1:
-        return  # unlimited
-    used = user.get("meetings_used_this_month", 0)
-    if used >= limit:
-        raise HTTPException(
-            status_code=402,
-            detail=f"Ai atins limita de {limit} întâlniri/lună pentru planul tău. Fă upgrade pentru mai multe."
-        )
-
-
-async def increment_usage(user_id) -> None:
-    """Increment meetings_used_this_month for a user."""
-    await users_col.update_one(
-        {"_id": user_id},
-        {"$inc": {"meetings_used_this_month": 1}}
-    )
+def get_plan_quota(user: dict) -> tuple[str, float, float]:
+    """Return (plan_key, used_minutes, limit_minutes) for a user."""
+    plan_key = normalize_plan(user.get("plan"))
+    limit = float(PLAN_LIMITS[plan_key]["minutes"])
+    used = float(user.get("minutes_used_this_month", 0.0) or 0.0)
+    return plan_key, used, limit
 
 
 # ==================== EMAIL HELPERS ====================
@@ -365,6 +369,35 @@ async def seed_default_localities():
     print(f"[GAL] Default localities seeded: {DEFAULT_LOCALITIES}")
 
 
+async def monthly_usage_reset_job():
+    """Resets minutes_used_this_month for all users on the 1st of each month at 00:00 UTC."""
+    while True:
+        now = datetime.now(timezone.utc)
+        if now.month == 12:
+            next_reset = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+        else:
+            next_reset = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
+
+        wait_seconds = (next_reset - now).total_seconds()
+        print(f"[Reset] Next usage reset in {wait_seconds/3600:.1f}h ({next_reset.date()})")
+        try:
+            await asyncio.sleep(wait_seconds)
+        except asyncio.CancelledError:
+            print("[Reset] monthly_usage_reset_job cancelled")
+            return
+
+        try:
+            result = await users_col.update_many(
+                {},
+                {"$set": {"minutes_used_this_month": 0.0, "last_monthly_reset": datetime.now(timezone.utc)}}
+            )
+            print(f"[Reset] ✅ Monthly reset — {result.modified_count} users reset")
+        except Exception as e:
+            print(f"[Reset] ⚠️ Failed monthly reset: {e}")
+            # short sleep to avoid hammering on persistent error
+            await asyncio.sleep(60)
+
+
 async def create_demo_account():
     """Create a demo account for Apple Review if it doesn't exist."""
     demo_email = "demo@meetings.ro"
@@ -376,7 +409,7 @@ async def create_demo_account():
             "name": "Demo User",
             "plan": "PRO",
             "is_verified": True,
-            "meetings_used_this_month": 0,
+            "minutes_used_this_month": 0.0,
             "last_monthly_reset": datetime.now(timezone.utc),
             "created_at": datetime.now(timezone.utc),
         })
@@ -401,6 +434,8 @@ async def startup():
     await invitations_col.create_index("expires_at", expireAfterSeconds=0)
     await seed_default_localities()
     await create_demo_account()
+    # Background: reset minute quotas on the 1st of each month at 00:00 UTC
+    asyncio.create_task(monthly_usage_reset_job())
     print("[Meetings.ro] Server started. Indexes ensured.")
 
 
@@ -443,7 +478,7 @@ async def auth_register(request: Request, req: RegisterRequest):
         "role": "member",
         "tenant_id": None,
         "is_verified": True,
-        "meetings_used_this_month": 0,
+        "minutes_used_this_month": 0.0,
         "last_monthly_reset": now,
         "created_at": now,
     }
@@ -463,7 +498,8 @@ async def auth_register(request: Request, req: RegisterRequest):
             "plan": "FREE",
             "role": "member",
             "tenant_id": None,
-            "meetings_used_this_month": 0,
+            "minutes_used_this_month":  0.0,
+            "minutes_limit_this_month": PLAN_LIMITS["starter"]["minutes"],
             "created_at": now.isoformat(),
         }
     }
@@ -490,6 +526,7 @@ async def auth_login(request: Request, req: LoginRequest):
     user_id = str(user["_id"])
     token = create_token(user_id, req.email)
 
+    plan_key, used_minutes, limit_minutes = get_plan_quota(user)
     return {
         "token": token,
         "user": {
@@ -500,7 +537,8 @@ async def auth_login(request: Request, req: LoginRequest):
             "plan": user.get("plan", "FREE"),
             "role": user.get("role", "member"),
             "tenant_id": str(user["tenant_id"]) if user.get("tenant_id") else None,
-            "meetings_used_this_month": user.get("meetings_used_this_month", 0),
+            "minutes_used_this_month":  round(used_minutes, 1),
+            "minutes_limit_this_month": int(limit_minutes),
             "created_at": user["created_at"].isoformat() if isinstance(user.get("created_at"), datetime) else str(user.get("created_at", "")),
         }
     }
@@ -533,6 +571,8 @@ async def admin_delete_all_users(admin: dict = Depends(require_admin)):
 @app.get("/api/auth/me")
 async def auth_me(user: dict = Depends(get_current_user)):
     """Get current authenticated user."""
+    user = await reset_monthly_if_needed(user)
+    plan_key, used_minutes, limit_minutes = get_plan_quota(user)
     return {
         "user": {
             "_id": str(user["_id"]),
@@ -540,7 +580,8 @@ async def auth_me(user: dict = Depends(get_current_user)):
             "email": user["email"],
             "company": user.get("company"),
             "plan": user.get("plan", "FREE"),
-            "meetings_used_this_month": user.get("meetings_used_this_month", 0),
+            "minutes_used_this_month":  round(used_minutes, 1),
+            "minutes_limit_this_month": int(limit_minutes),
             "created_at": user["created_at"].isoformat() if isinstance(user.get("created_at"), datetime) else str(user.get("created_at", "")),
             "tenant_id": user.get("tenant_id"),   # org membership — drives SlideDrawer menu
             "role": user.get("role"),              # admin / member — drives Admin badge
@@ -821,18 +862,19 @@ async def notify_user_meeting_done(user_id: str, meeting_title: str):
 # ==================== USAGE ENDPOINT ====================
 @app.get("/api/users/me/usage")
 async def get_user_usage(user: dict = Depends(get_current_user)):
-    """Get current user's plan usage stats."""
+    """Get current user's plan usage stats (minute-based)."""
     user = await reset_monthly_if_needed(user)
-    plan = user.get("plan", "FREE")
-    limit = PLAN_LIMITS.get(plan.lower(), PLAN_LIMITS["free"])
-    used = user.get("meetings_used_this_month", 0)
-
+    plan_key, used_minutes, limit_minutes = get_plan_quota(user)
+    remaining = max(0.0, limit_minutes - used_minutes)
+    percentage = round((used_minutes / limit_minutes) * 100, 1) if limit_minutes > 0 else 0.0
     return {
-        "plan": plan,
-        "meetings_used": used,
-        "meetings_limit": limit,  # -1 = unlimited
-        "meetings_remaining": (limit - used) if limit != -1 else -1,
-        "percentage": round((used / limit) * 100, 1) if limit > 0 else 0,
+        "plan": user.get("plan", "FREE"),
+        "plan_key": plan_key,
+        "minutes_used":      round(used_minutes, 1),
+        "minutes_limit":     int(limit_minutes),
+        "minutes_remaining": round(remaining, 1),
+        "percentage":        min(100.0, percentage),
+        "label":             PLAN_LIMITS[plan_key]["label"],
     }
 
 
@@ -1096,6 +1138,39 @@ async def split_audio_into_chunks(audio_path: str) -> list:
 
     print(f"[Split] ✅ {len(chunk_paths)}/{num_chunks} chunks ready")
     return chunk_paths
+
+
+# ==================== AUDIO DURATION ====================
+async def get_audio_duration_seconds(file_path: str) -> float:
+    """
+    Returns audio duration in seconds using ffprobe.
+    Returns 0.0 if ffprobe is unavailable or file is unreadable.
+    Used for minute-based quota accounting on the user's plan.
+    """
+    if not shutil.which("ffprobe"):
+        return 0.0
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            file_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+        except asyncio.TimeoutError:
+            try: proc.kill()
+            except Exception: pass
+            return 0.0
+        if proc.returncode != 0 or not stdout:
+            return 0.0
+        data = json.loads(stdout.decode("utf-8", errors="ignore"))
+        return float(data["format"]["duration"])
+    except Exception as e:
+        print(f"[Duration] ffprobe error: {e}")
+        return 0.0
 
 
 # ==================== AI CLIENTS ====================
@@ -1851,6 +1926,21 @@ async def process_meeting(meeting_id: str):
             {"$set": update_data}
         )
 
+        # ---- Charge minutes against user's plan (status is now "done") ----
+        try:
+            duration_minutes = float(meeting.get("duration_seconds", 0.0) or 0.0) / 60.0
+            owner_id = meeting.get("user_id")
+            if duration_minutes > 0 and owner_id:
+                await users_col.update_one(
+                    {"_id": ObjectId(owner_id)},
+                    {"$inc": {"minutes_used_this_month": duration_minutes}}
+                )
+                owner = await users_col.find_one({"_id": ObjectId(owner_id)})
+                owner_plan = normalize_plan(owner.get("plan") if owner else None)
+                print(f"[Usage] +{duration_minutes:.1f} min for user {owner_id} | plan: {owner_plan}")
+        except Exception as usage_err:
+            print(f"[Usage] Failed to increment minutes for meeting {meeting_id}: {usage_err}")
+
         # Ensure locality exists in localities collection (only real localities, not placeholders)
         if locality:
             await localities_col.update_one(
@@ -2272,7 +2362,7 @@ async def register_with_invite(body: RegisterWithInviteRequest):
         "role": invite["role"],
         "tenant_id": invite["tenant_id"],
         "is_verified": True,
-        "meetings_used_this_month": 0,
+        "minutes_used_this_month": 0.0,
         "last_monthly_reset": now,
         "created_at": now,
         "updated_at": now,
@@ -2321,9 +2411,8 @@ async def change_user_role(user_id: str, body: RoleUpdateBody, user: dict = Depe
 
 @app.post("/api/meetings")
 async def create_meeting(data: MeetingCreate = None, user: dict = Depends(get_current_user)):
-    """Create a new meeting placeholder (auth + plan limit enforced)."""
-    await check_plan_limit(user)
-
+    """Create a new meeting placeholder. Plan-quota enforcement happens at
+    upload time (minute-based) rather than per-meeting."""
     now = datetime.now(timezone.utc)
 
     # Determine vertical: explicit request > tenant config > GENERAL default
@@ -2367,9 +2456,6 @@ async def create_meeting(data: MeetingCreate = None, user: dict = Depends(get_cu
     result = await meetings_col.insert_one(meeting)
     meeting["_id"] = result.inserted_id
 
-    # Increment usage counter
-    await increment_usage(user["_id"])
-
     return serialize_doc(meeting)
 
 
@@ -2387,6 +2473,26 @@ MAX_FILE_SIZE = 200 * 1024 * 1024  # 200MB hard limit — backend will chunk any
 @app.post("/api/meetings/{meeting_id}/upload")
 async def upload_audio(meeting_id: str, background_tasks: BackgroundTasks, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     """Upload audio file for a meeting and start processing."""
+    # ---- Plan quota gate (minute-based) ----
+    user = await reset_monthly_if_needed(user)
+    plan_key, used_minutes, limit_minutes = get_plan_quota(user)
+    if used_minutes >= limit_minutes:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "plan_limit_reached",
+                "message": (
+                    f"Ai folosit {used_minutes:.0f} din {int(limit_minutes)} minute "
+                    f"disponibile în planul tău {plan_key.capitalize()}. "
+                    f"Fă upgrade pentru a continua."
+                ),
+                "minutes_used": round(used_minutes, 1),
+                "minutes_limit": int(limit_minutes),
+                "remaining_minutes": 0,
+                "upgrade_required": True,
+            }
+        )
+
     # Validate MIME type — allow unknown types if extension is valid
     file_ext = Path(file.filename or "").suffix.lower() if file.filename else ""
     content_type = (file.content_type or "").lower().strip()
@@ -2424,7 +2530,11 @@ async def upload_audio(meeting_id: str, background_tasks: BackgroundTasks, file:
         await f.write(content)
 
     file_size = os.path.getsize(audio_path)
-    
+
+    # Detect audio duration so we can charge minutes against the user's plan
+    duration_seconds = await get_audio_duration_seconds(audio_path)
+    print(f"[Upload] Duration detected: {duration_seconds:.1f}s ({duration_seconds/60:.1f} min)")
+
     # Update meeting with audio info
     await meetings_col.update_one(
         {"_id": ObjectId(meeting_id)},
@@ -2433,6 +2543,7 @@ async def upload_audio(meeting_id: str, background_tasks: BackgroundTasks, file:
             "audio_url": f"/api/meetings/{meeting_id}/audio",
             "status": "uploading",
             "file_size": file_size,
+            "duration_seconds": duration_seconds,
             "updated_at": datetime.now(timezone.utc)
         }}
     )

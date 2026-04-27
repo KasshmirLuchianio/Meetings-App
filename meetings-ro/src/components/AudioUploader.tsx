@@ -99,6 +99,18 @@ export default function AudioUploader({ onUploadComplete, onLimitReached }: Audi
       xhr.onload = () => {
         if (xhr.status === 200) {
           resolve();
+        } else if (xhr.status === 403) {
+          // Plan-quota limit hit at upload time (minute-based)
+          let detail: any = null;
+          try { detail = JSON.parse(xhr.responseText)?.detail; } catch {}
+          if (detail?.error === 'plan_limit_reached') {
+            const err: any = new Error(detail.message || 'Limita de minute atinsă');
+            err.planLimitReached = true;
+            err.message_ro = detail.message;
+            reject(err);
+            return;
+          }
+          reject(new Error(`Upload failed with status ${xhr.status}`));
         } else {
           reject(new Error(`Upload failed with status ${xhr.status}`));
         }
@@ -124,7 +136,9 @@ export default function AudioUploader({ onUploadComplete, onLimitReached }: Audi
         xhr.setRequestHeader('Authorization', `Bearer ${token}`);
       }
       xhr.send(formData);
-    }).catch(async (error) => {
+    }).catch(async (error: any) => {
+      // Don't retry plan-limit errors — the server rejection won't change.
+      if (error?.planLimitReached) throw error;
       if (attempt < UPLOAD_CONFIG.maxRetries - 1) {
         // Retry with exponential backoff
         const backoffMs = UPLOAD_CONFIG.backoffMs[attempt];
@@ -150,24 +164,6 @@ export default function AudioUploader({ onUploadComplete, onLimitReached }: Audi
         body: JSON.stringify({ vertical_type: 'GENERAL' }),
       });
 
-      if (createResponse.status === 402) {
-        const err = await createResponse.json().catch(() => ({ limit: 0, plan: 'free' }));
-        if (onLimitReached) {
-          onLimitReached(err.detail || `Ai folosit toate cele ${err.limit} înregistrări din planul ${(err.plan || 'FREE').toUpperCase()}.`);
-        } else {
-          Alert.alert(
-            'Limită atinsă',
-            `Ai folosit toate cele ${err.limit} înregistrări din planul ${(err.plan || 'FREE').toUpperCase()}. Upgradează pentru a continua.`,
-            [
-              { text: 'Mai târziu', style: 'cancel' },
-              { text: 'Vezi planuri', onPress: () => router.push('/pricing') },
-            ]
-          );
-        }
-        setUploading(false);
-        return;
-      }
-
       if (!createResponse.ok) {
         throw new Error('Failed to create meeting');
       }
@@ -183,11 +179,27 @@ export default function AudioUploader({ onUploadComplete, onLimitReached }: Audi
       setUploading(false);
       setProgress({ totalBytesSent: 0, totalBytesExpectedToSend: 0, percentage: 0 });
       onUploadComplete(meeting._id);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Upload error:', error);
-      alert('Eroare la încărcare. Te rugăm încearcă din nou.');
       setUploading(false);
       setProgress({ totalBytesSent: 0, totalBytesExpectedToSend: 0, percentage: 0 });
+      if (error?.planLimitReached) {
+        const msg = error.message_ro || error.message || 'Ai atins limita de minute disponibile.';
+        if (onLimitReached) {
+          onLimitReached(msg);
+        } else {
+          Alert.alert(
+            'Limită atinsă',
+            msg,
+            [
+              { text: 'Mai târziu', style: 'cancel' },
+              { text: 'Vezi planuri', onPress: () => router.push('/pricing') },
+            ]
+          );
+        }
+        return;
+      }
+      alert('Eroare la încărcare. Te rugăm încearcă din nou.');
     }
   };
 
