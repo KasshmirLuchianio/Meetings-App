@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
     python3.11-venv \
     python3-pip \
     supervisor \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # -------------------- MongoDB 7.0 --------------------

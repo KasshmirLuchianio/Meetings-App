@@ -4,6 +4,7 @@ import uuid
 import re
 import math
 import glob
+import shutil
 import asyncio
 import secrets
 import tempfile
@@ -985,6 +986,12 @@ async def preprocess_audio(input_path: str) -> str:
     Applies EBU R128 loudness normalization and resamples to 16kHz mono.
     Returns path to preprocessed WAV, or original path if ffmpeg fails/unavailable.
     """
+    # Defensive fallback — if ffmpeg binary is missing, skip preprocessing entirely
+    # so the pipeline can still attempt direct transcription with the original file.
+    if shutil.which("ffmpeg") is None:
+        print("[ffmpeg] ⚠️ not available — skipping preprocess step")
+        return input_path
+
     base = input_path.rsplit('.', 1)[0]
     output_path = f"{base}_preprocessed.wav"
     try:
@@ -1023,6 +1030,13 @@ async def split_audio_into_chunks(audio_path: str) -> list:
     Returns list of (chunk_path, time_offset_seconds) tuples.
     All chunk files are tempfile-based — caller must clean them up.
     """
+    # Defensive fallback — if ffmpeg/ffprobe are missing, return the original
+    # file as a single "chunk" with offset 0 so the pipeline can still attempt
+    # a direct transcription instead of failing the whole job.
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        print("[ffmpeg] ⚠️ not available — skipping split, returning original file as single chunk")
+        return [(audio_path, 0.0)]
+
     # Step 1: Get total duration via ffprobe (JSON output)
     total_duration: float = 0.0
     try:
