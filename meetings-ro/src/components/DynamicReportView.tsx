@@ -56,6 +56,54 @@ function ReportSection({ title, icon, children, noPadding }: {
   );
 }
 
+// ── List item parsing & rendering ──────────────────────────
+// Items in vertical_config list fields can arrive as:
+//  - plain strings ("Ion Popescu")
+//  - objects ({ task, owner, deadline, ... } for action items)
+//  - JSON strings that decode to objects (legacy / Claude returning text)
+// parseActionItem normalises all three into { task, owner?, deadline? }.
+function parseActionItem(item: any): { task: string; owner?: string; deadline?: string } {
+  if (item == null) return { task: '' };
+  if (typeof item === 'string') {
+    const trimmed = item.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === 'object') return parsed;
+      } catch { /* fall through */ }
+    }
+    return { task: item };
+  }
+  if (typeof item === 'object') {
+    // Tolerate keys that AI sometimes emits in Romanian
+    return {
+      task:     item.task     || item.text   || item.sarcina   || item.descriere || '',
+      owner:    item.owner    || item.responsabil || item.assignee || undefined,
+      deadline: item.deadline || item.termen || item.due_date   || undefined,
+    };
+  }
+  return { task: String(item) };
+}
+
+function ActionItemView({ rawItem }: { rawItem: any }) {
+  const item = parseActionItem(rawItem);
+  if (!item.task) return null;
+  const meta = [
+    item.owner    && `Responsabil: ${item.owner}`,
+    item.deadline && `Termen: ${item.deadline}`,
+  ].filter(Boolean).join('  ·  ');
+
+  return (
+    <View style={s.actionItemRow}>
+      <Text style={s.actionItemBullet}>•</Text>
+      <View style={s.actionItemContent}>
+        <Text style={s.actionItemTask}>{item.task}</Text>
+        {!!meta && <Text style={s.actionItemMeta}>{meta}</Text>}
+      </View>
+    </View>
+  );
+}
+
 // ── Field row ──────────────────────────────────────────────
 function FieldRow({ label, value }: { label: string; value: any }) {
   if (!value || (Array.isArray(value) && value.length === 0)) return null;
@@ -65,12 +113,7 @@ function FieldRow({ label, value }: { label: string; value: any }) {
       <View style={s.fieldContainer}>
         <Text style={s.fieldLabel}>{label}</Text>
         {value.map((item: any, i: number) => (
-          <View key={i} style={s.listItem}>
-            <View style={s.bullet} />
-            <Text style={s.listText}>
-              {typeof item === 'object' ? JSON.stringify(item) : String(item)}
-            </Text>
-          </View>
+          <ActionItemView key={i} rawItem={item} />
         ))}
       </View>
     );
@@ -580,10 +623,7 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
                     <ReportSection key={key} title={label} icon={<FileText size={15} color={COLORS.navy} />}>
                       {Array.isArray(val) ? (
                         val.map((item: any, i: number) => (
-                          <View key={i} style={s.listItem}>
-                            <View style={s.bullet} />
-                            <Text style={s.listText}>{typeof item === 'object' ? JSON.stringify(item) : String(item)}</Text>
-                          </View>
+                          <ActionItemView key={i} rawItem={item} />
                         ))
                       ) : (
                         <Text style={s.bodyText}>{String(val)}</Text>
@@ -965,6 +1005,32 @@ const s = StyleSheet.create({
     color: '#374151',
     fontSize: 15,
     lineHeight: 22,
+  },
+  actionItemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingVertical: 6,
+  },
+  actionItemBullet: {
+    fontSize: 16,
+    color: '#1B2A4A',
+    lineHeight: 22,
+  },
+  actionItemContent: {
+    flex: 1,
+    gap: 2,
+  },
+  actionItemTask: {
+    fontSize: 14,
+    color: '#1B2A4A',
+    fontWeight: '500',
+    lineHeight: 20,
+  },
+  actionItemMeta: {
+    fontSize: 12,
+    color: '#6B6560',
+    lineHeight: 18,
   },
 
   // Transcript
