@@ -10,8 +10,8 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string, company?: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<User>;
+  register: (name: string, email: string, password: string, company?: string) => Promise<User | null>;
   logout: () => Promise<void>;
   updatePlan: (plan: PricingTier) => void;
   refreshUsage: () => Promise<void>;
@@ -23,8 +23,8 @@ const AuthContext = createContext<AuthContextType>({
   token: null,
   isLoading: true,
   isAuthenticated: false,
-  login: async () => {},
-  register: async () => {},
+  login: async () => ({} as User),
+  register: async () => null,
   logout: async () => {},
   updatePlan: () => {},
   refreshUsage: async () => {},
@@ -108,6 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAuthToken(data.token);
     await SecureStore.setItemAsync(TOKEN_KEY, data.token);
     await AsyncStorage.setItem(USER_KEY, JSON.stringify(data.user));
+    return data.user as User;
   };
 
   const register = async (name: string, email: string, password: string, company?: string) => {
@@ -129,7 +130,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAuthToken(data.token);
       await SecureStore.setItemAsync(TOKEN_KEY, data.token);
       await AsyncStorage.setItem(USER_KEY, JSON.stringify(data.user));
+      return data.user as User;
     }
+    return null;
   };
 
   const logout = async () => {

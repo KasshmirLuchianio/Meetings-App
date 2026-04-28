@@ -35,8 +35,14 @@ export default function LoginScreen() {
     setIsLoading(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      await login(email.trim(), password);
-      router.replace('/');
+      const loggedInUser = await login(email.trim(), password);
+      // Unverified accounts go straight to the verification screen.
+      // Verified accounts land on Home.
+      if (loggedInUser && loggedInUser.email_verified === false) {
+        router.replace('/verify-email');
+      } else {
+        router.replace('/');
+      }
     } catch (err: any) {
       if (err.message === 'email_not_verified') {
         setNeedsVerification(true);

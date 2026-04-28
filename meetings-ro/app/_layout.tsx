@@ -145,6 +145,7 @@ export default function RootLayout() {
                   <Stack.Screen name="welcome" options={{ animation: 'fade' }} />
                   <Stack.Screen name="login" />
                   <Stack.Screen name="register" />
+                  <Stack.Screen name="verify-email" options={{ animation: 'fade' }} />
                   <Stack.Screen name="forgot-password" />
                   <Stack.Screen name="pricing" options={{ animation: 'slide_from_bottom' }} />
                   <Stack.Screen name="browse" />
