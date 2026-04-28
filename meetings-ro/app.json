@@ -71,8 +71,7 @@
         {
           "microphonePermission": "Aplicația necesită acces la microfon pentru a înregistra ședințele."
         }
-      ],
-      "@sentry/react-native"
+      ]
     ],
     "extra": {
       "router": {
