@@ -100,7 +100,10 @@ export default function RegisterScreen() {
         }
       }
 
-      router.replace('/');
+      // Newly-registered users are unverified — drop straight onto the
+      // verification screen. The Home redirect would do the same thing,
+      // but going direct avoids a flicker.
+      router.replace('/verify-email');
     } catch (err: any) {
       setError(err.message || 'Eroare la înregistrare. Încearcă din nou.');
     } finally {

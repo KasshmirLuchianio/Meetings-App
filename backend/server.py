@@ -295,35 +295,96 @@ def get_plan_quota(user: dict) -> tuple[str, float, float]:
 
 
 # ==================== EMAIL HELPERS ====================
-def build_verification_email(verify_token: str) -> str:
-    """Build HTML for verification email."""
-    return f"""
-    <div style="font-family: 'DM Sans', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px;">
-        <h1 style="color: #1B2A4A; font-size: 24px;">Bun venit la Meetings.ro</h1>
-        <p style="color: #444; font-size: 16px;">Confirmă adresa de email pentru a activa contul tău.</p>
-        <a href="https://meetings-ro-api.onrender.com/api/auth/verify?token={verify_token}"
-           style="display:inline-block; background:#1B2A4A; color:#FAF8F3; padding:14px 28px;
-                  border-radius:8px; text-decoration:none; font-size:16px; margin: 20px 0;">
-            Confirmă contul
-        </a>
-        <p style="color:#888; font-size:13px;">Link-ul expiră în 24 de ore.</p>
-        <hr style="border:none; border-top:1px solid #eee; margin: 30px 0;">
-        <p style="color:#888; font-size:12px;">Meetings.ro — Transcriere și sinteză AI pentru orice domeniu</p>
-    </div>
+# Verification link points to the backend, which marks email_verified=True
+# and then 302-redirects to the deep link `meetingsro://email-verified`.
+API_PUBLIC_URL = os.environ.get("API_PUBLIC_URL", "https://meetings-ro-api.onrender.com")
+EMAIL_FROM = "Meetings.ro <noreply@meetings-ro.app>"
+
+
+def build_verification_email_html(verification_url: str, name: str) -> str:
+    """Branded HTML for the verification email — navy header, ivory body, orange accent."""
+    greeting = f"Bună ziua, {name}!" if name else "Bună ziua!"
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:0;background:#FAF8F3;font-family:Georgia,serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#FAF8F3;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border-radius:16px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+        <tr>
+          <td style="background:#1B2A4A;padding:32px 40px;text-align:center;">
+            <span style="font-size:36px;font-weight:700;color:#FFFFFF;letter-spacing:-1px;">M</span>
+            <span style="display:block;font-size:12px;color:rgba(255,255,255,0.6);margin-top:4px;letter-spacing:2px;text-transform:uppercase;">Meetings.ro</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:40px 40px 32px;">
+            <h1 style="margin:0 0 16px;font-size:24px;color:#1B2A4A;font-weight:600;">{greeting}</h1>
+            <p style="margin:0 0 24px;font-size:16px;color:#4A5568;line-height:1.6;">
+              Îți mulțumim că te-ai înregistrat pe <strong>Meetings.ro</strong>.
+              Pentru a-ți activa contul, te rugăm să verifici adresa de email.
+            </p>
+            <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+              <tr><td style="background:#1B2A4A;border-radius:8px;padding:14px 32px;">
+                <a href="{verification_url}"
+                   style="color:#FFFFFF;text-decoration:none;font-size:16px;font-weight:600;font-family:Arial,sans-serif;">
+                  Verifică adresa de email →
+                </a>
+              </td></tr>
+            </table>
+            <p style="margin:0 0 8px;font-size:13px;color:#9CA3AF;">Sau copiază acest link în browser:</p>
+            <p style="margin:0 0 24px;font-size:12px;color:#E87040;word-break:break-all;">{verification_url}</p>
+            <p style="margin:0;font-size:13px;color:#9CA3AF;line-height:1.5;">
+              Link-ul expiră în <strong>24 de ore</strong>.
+              Dacă nu ai creat acest cont, poți ignora acest email.
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#F8F7F4;padding:20px 40px;text-align:center;border-top:1px solid #E5E7EB;">
+            <p style="margin:0;font-size:12px;color:#9CA3AF;">© 2026 Meetings.ro · NEDEROV COMEX SRL</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+
+
+async def send_verification_email(email: str, token: str, name: str = "") -> bool:
     """
+    Send the email-verification link via Resend.
+    Non-blocking — caller should `asyncio.create_task(...)` so registration
+    is not delayed by SMTP / network latency.
+    """
+    if not os.environ.get("RESEND_API_KEY"):
+        print(f"[EMAIL] ⚠️ RESEND_API_KEY not set — cannot send verification to {email}")
+        return False
+
+    verification_url = f"{API_PUBLIC_URL}/api/auth/verify-email?token={token}"
+    try:
+        params = {
+            "from": EMAIL_FROM,
+            "to": [email],
+            "subject": "Verifică-ți adresa de email — Meetings.ro",
+            "html": build_verification_email_html(verification_url, name),
+        }
+        # resend SDK is sync — push to a thread so we don't block the event loop
+        await asyncio.to_thread(resend.Emails.send, params)
+        print(f"[Email] Verification email sent to {email}")
+        return True
+    except Exception as e:
+        print(f"[Email] Failed to send verification email to {email}: {e}")
+        return False
 
 
-def send_verification_email(email: str, verify_token: str):
-    """Send verification email via Resend."""
-    print(f"[EMAIL] RESEND_API_KEY present: {bool(os.environ.get('RESEND_API_KEY'))}")
-    params: resend.Emails.SendParams = {
-        "from": "Meetings.ro <onboarding@resend.dev>",
-        "to": [email],
-        "subject": "Confirmă contul tău Meetings.ro",
-        "html": build_verification_email(verify_token),
-    }
-    email_response = resend.Emails.send(params)
-    print(f"[EMAIL] Sent to {email}: {email_response}")
+def is_email_verified(user: dict) -> bool:
+    """Check verification status. Reads either field for backward compat."""
+    return bool(user.get("email_verified") or user.get("is_verified"))
 
 
 # ==================== HELPERS ====================
@@ -408,7 +469,7 @@ async def create_demo_account():
             "password_hash": hash_password("Demo2026!"),
             "name": "Demo User",
             "plan": "PRO",
-            "is_verified": True,
+            "email_verified": True,
             "minutes_used_this_month": 0.0,
             "last_monthly_reset": datetime.now(timezone.utc),
             "created_at": datetime.now(timezone.utc),
@@ -466,7 +527,7 @@ async def auth_register(request: Request, req: RegisterRequest):
         raise HTTPException(status_code=400, detail="Parola trebuie să aibă minim 6 caractere")
 
     # Generate verification token
-    verify_token = secrets.token_urlsafe(32)
+    verification_token = secrets.token_urlsafe(32)
 
     now = datetime.now(timezone.utc)
     user_doc = {
@@ -477,7 +538,9 @@ async def auth_register(request: Request, req: RegisterRequest):
         "plan": "FREE",
         "role": "member",
         "tenant_id": None,
-        "is_verified": True,
+        "email_verified":             False,
+        "email_verification_token":   verification_token,
+        "email_verification_sent_at": now,
         "minutes_used_this_month": 0.0,
         "last_monthly_reset": now,
         "created_at": now,
@@ -485,7 +548,14 @@ async def auth_register(request: Request, req: RegisterRequest):
     result = await users_col.insert_one(user_doc)
     user_id = str(result.inserted_id)
 
-    # Auto-login: return token + user directly
+    # Send verification email — non-blocking. Don't fail registration if email
+    # delivery is slow or temporarily down.
+    asyncio.create_task(send_verification_email(
+        email=req.email, token=verification_token, name=req.name,
+    ))
+
+    # Auto-login so the mobile app can show the "verify your email" screen
+    # immediately. Verification gate is enforced at action time (upload/create).
     token = create_token(user_id, req.email)
 
     return {
@@ -498,6 +568,7 @@ async def auth_register(request: Request, req: RegisterRequest):
             "plan": "FREE",
             "role": "member",
             "tenant_id": None,
+            "email_verified": False,
             "minutes_used_this_month":  0.0,
             "minutes_limit_this_month": PLAN_LIMITS["starter"]["minutes"],
             "created_at": now.isoformat(),
@@ -516,12 +587,9 @@ async def auth_login(request: Request, req: LoginRequest):
     if not verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Email sau parolă incorectă")
 
-    # Auto-verify unverified accounts (Resend sandbox can't deliver to all emails)
-    if not user.get("is_verified", False):
-        await users_col.update_one(
-            {"_id": user["_id"]},
-            {"$set": {"is_verified": True}}
-        )
+    # NOTE: We deliberately do NOT auto-verify here. The mobile app reads
+    # email_verified from the response and routes to /verify-email if False.
+    # Verification gate is enforced at action time (upload, create_meeting).
 
     user_id = str(user["_id"])
     token = create_token(user_id, req.email)
@@ -537,6 +605,7 @@ async def auth_login(request: Request, req: LoginRequest):
             "plan": user.get("plan", "FREE"),
             "role": user.get("role", "member"),
             "tenant_id": str(user["tenant_id"]) if user.get("tenant_id") else None,
+            "email_verified": is_email_verified(user),
             "minutes_used_this_month":  round(used_minutes, 1),
             "minutes_limit_this_month": int(limit_minutes),
             "created_at": user["created_at"].isoformat() if isinstance(user.get("created_at"), datetime) else str(user.get("created_at", "")),
@@ -580,8 +649,9 @@ async def auth_me(user: dict = Depends(get_current_user)):
             "email": user["email"],
             "company": user.get("company"),
             "plan": user.get("plan", "FREE"),
-            "minutes_used_this_month":  round(used_minutes, 1),
-            "minutes_limit_this_month": int(limit_minutes),
+            "email_verified":            is_email_verified(user),
+            "minutes_used_this_month":   round(used_minutes, 1),
+            "minutes_limit_this_month":  int(limit_minutes),
             "created_at": user["created_at"].isoformat() if isinstance(user.get("created_at"), datetime) else str(user.get("created_at", "")),
             "tenant_id": user.get("tenant_id"),   # org membership — drives SlideDrawer menu
             "role": user.get("role"),              # admin / member — drives Admin badge
@@ -700,103 +770,117 @@ async def reset_password(request: Request, req: ResetPasswordRequest):
 
 # ==================== EMAIL VERIFICATION ENDPOINTS ====================
 
-@app.get("/api/auth/verify")
+# Returns a small HTML page that tries the deep link AND shows a fallback,
+# in case the user opens the email on a desktop where meetingsro:// is not registered.
+def _verification_redirect_page(status: str) -> str:
+    deep_link = f"meetingsro://email-verified?status={status}"
+    if status == "success":
+        title = "✓ Email verificat"
+        body  = "Contul tău Meetings.ro este activ. Te poți întoarce în aplicație."
+    elif status == "already_verified":
+        title = "Email deja verificat"
+        body  = "Contul a fost deja confirmat. Te poți întoarce în aplicație."
+    else:
+        title = "Link invalid sau expirat"
+        body  = "Solicită un email nou din aplicație."
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Meetings.ro</title>
+<script>setTimeout(function(){{ window.location.href = "{deep_link}"; }}, 200);</script>
+</head><body style="font-family:Georgia,serif;background:#FAF8F3;text-align:center;padding:60px 20px;">
+<div style="max-width:480px;margin:0 auto;background:#FFFFFF;border-radius:16px;padding:40px;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+  <h1 style="color:#1B2A4A;margin:0 0 16px;">{title}</h1>
+  <p style="color:#4A5568;font-size:16px;line-height:1.6;margin:0 0 24px;">{body}</p>
+  <a href="{deep_link}" style="display:inline-block;background:#1B2A4A;color:#FFFFFF;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:600;">Deschide aplicația</a>
+</div>
+</body></html>"""
+
+
+@app.get("/api/auth/verify-email")
 async def verify_email(token: str = Query(...)):
-    """Verify user email via token link."""
-    try:
-        user = await users_col.find_one({
-            "verify_token": token,
-        })
-        if not user:
-            return HTMLResponse("""
-                <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#FAF8F3">
-                <h2 style="color:#1B2A4A">Link expirat sau invalid</h2>
-                <p>Solicită un nou email de confirmare din aplicație.</p>
-                </body></html>
-            """, status_code=400)
+    """
+    Verifies email using the token from the verification link.
+    Marks user as verified and redirects to the mobile app via deep link.
+    """
+    if not token:
+        raise HTTPException(status_code=400, detail="Token lipsă")
 
-        # Check expiration (handle both aware and naive datetimes from MongoDB)
-        expires = user.get("verify_token_expires")
-        if expires and isinstance(expires, datetime):
-            now = datetime.now(timezone.utc)
-            # Make expires timezone-aware if it's naive (MongoDB can return naive datetimes)
-            if expires.tzinfo is None:
-                expires = expires.replace(tzinfo=timezone.utc)
-            if now > expires:
-                return HTMLResponse("""
-                    <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#FAF8F3">
-                    <h2 style="color:#1B2A4A">Link expirat</h2>
-                    <p>Solicită un nou email de confirmare din aplicație.</p>
-                    </body></html>
-                """, status_code=400)
+    # Look up user by token (regardless of verification status, so we can
+    # tell "already verified" apart from "invalid token")
+    user = await users_col.find_one({"email_verification_token": token})
 
-        await users_col.update_one(
-            {"_id": user["_id"]},
-            {"$set": {"is_verified": True}, "$unset": {"verify_token": "", "verify_token_expires": ""}}
-        )
-        return HTMLResponse("""
-            <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#FAF8F3">
-            <h1 style="color:#1B2A4A">✓ Cont confirmat!</h1>
-            <p style="color:#444;font-size:18px">Contul tău Meetings.ro este activ.</p>
-            <p style="color:#888">Deschide aplicația și conectează-te.</p>
-            </body></html>
-        """)
-    except Exception as e:
-        print(f"[VERIFY ERROR] {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(500, str(e))
+    if not user:
+        # Maybe they clicked the link twice — token was unset after first use
+        return HTMLResponse(_verification_redirect_page("already_verified"), status_code=200)
+
+    if is_email_verified(user):
+        return HTMLResponse(_verification_redirect_page("already_verified"), status_code=200)
+
+    # 24h expiry check
+    sent_at = user.get("email_verification_sent_at")
+    if isinstance(sent_at, datetime):
+        if sent_at.tzinfo is None:
+            sent_at = sent_at.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - sent_at > timedelta(hours=24):
+            return HTMLResponse(_verification_redirect_page("expired"), status_code=400)
+
+    await users_col.update_one(
+        {"_id": user["_id"]},
+        {
+            "$set": {"email_verified": True, "email_verified_at": datetime.now(timezone.utc)},
+            "$unset": {
+                "email_verification_token":   "",
+                "email_verification_sent_at": "",
+                # also clear legacy fields if present
+                "verify_token":         "",
+                "verify_token_expires": "",
+                "is_verified":          "",
+            }
+        }
+    )
+    print(f"[Email] Verified: {user['email']}")
+    return HTMLResponse(_verification_redirect_page("success"), status_code=200)
 
 
-class ResendVerificationRequest(BaseModel):
-    email: str
+# Keep the old /api/auth/verify path working — it just forwards to the new one
+@app.get("/api/auth/verify")
+async def verify_email_legacy(token: str = Query(...)):
+    return await verify_email(token=token)
 
 
 @app.post("/api/auth/resend-verification")
-async def resend_verification(req: ResendVerificationRequest):
-    """Resend verification email. Rate limited: max 3/hour per email."""
-    user = await users_col.find_one({"email": req.email})
-    if not user:
-        # Don't reveal if email exists
-        return {"message": "Dacă adresa există, vei primi un email de confirmare."}
-
-    if user.get("is_verified", False):
-        return {"message": "Contul este deja verificat. Te poți autentifica."}
+async def resend_verification(current_user: dict = Depends(get_current_user)):
+    """Resends verification email for the currently logged-in user."""
+    if is_email_verified(current_user):
+        return {"ok": True, "message": "Email deja verificat"}
 
     # Rate limit: max 3 emails per hour
     now = datetime.now(timezone.utc)
     one_hour_ago = now - timedelta(hours=1)
-    sent_times = user.get("verification_emails_sent", [])
-    recent_sends = [t for t in sent_times if isinstance(t, datetime) and t > one_hour_ago]
-
+    sent_times = current_user.get("verification_emails_sent", [])
+    recent_sends = [t for t in sent_times if isinstance(t, datetime) and (t.replace(tzinfo=timezone.utc) if t.tzinfo is None else t) > one_hour_ago]
     if len(recent_sends) >= 3:
         raise HTTPException(
             status_code=429,
             detail="Prea multe încercări. Așteaptă o oră înainte de a solicita un alt email."
         )
 
-    # Generate new token
-    verify_token = secrets.token_urlsafe(32)
-
+    new_token = secrets.token_urlsafe(32)
     await users_col.update_one(
-        {"_id": user["_id"]},
+        {"_id": current_user["_id"]},
         {
             "$set": {
-                "verify_token": verify_token,
-                "verify_token_expires": now + timedelta(hours=24),
+                "email_verification_token":   new_token,
+                "email_verification_sent_at": now,
             },
-            "$push": {
-                "verification_emails_sent": now,
-            }
+            "$push": {"verification_emails_sent": now},
         }
     )
 
-    # Send email
-    try:
-        send_verification_email(req.email, verify_token)
-    except Exception as e:
-        print(f"[Resend] Failed to resend verification to {req.email}: {e}")
-        raise HTTPException(status_code=500, detail="Eroare la trimiterea emailului. Încearcă din nou.")
+    asyncio.create_task(send_verification_email(
+        email=current_user["email"], token=new_token, name=current_user.get("name", ""),
+    ))
+    return {"ok": True, "message": "Email de verificare retrimis"}
 
     return {"message": "Email de confirmare retrimis. Verifică inbox-ul."}
 
@@ -2361,7 +2445,8 @@ async def register_with_invite(body: RegisterWithInviteRequest):
         "plan": "FREE",
         "role": invite["role"],
         "tenant_id": invite["tenant_id"],
-        "is_verified": True,
+        # Invited users are pre-verified — they followed an org-issued link
+        "email_verified": True,
         "minutes_used_this_month": 0.0,
         "last_monthly_reset": now,
         "created_at": now,
@@ -2413,6 +2498,16 @@ async def change_user_role(user_id: str, body: RoleUpdateBody, user: dict = Depe
 async def create_meeting(data: MeetingCreate = None, user: dict = Depends(get_current_user)):
     """Create a new meeting placeholder. Plan-quota enforcement happens at
     upload time (minute-based) rather than per-meeting."""
+    # Email verification gate
+    if not is_email_verified(user):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "email_not_verified",
+                "message": "Te rugăm să îți verifici adresa de email înainte de a folosi aplicația.",
+            }
+        )
+
     now = datetime.now(timezone.utc)
 
     # Determine vertical: explicit request > tenant config > GENERAL default
@@ -2473,6 +2568,16 @@ MAX_FILE_SIZE = 200 * 1024 * 1024  # 200MB hard limit — backend will chunk any
 @app.post("/api/meetings/{meeting_id}/upload")
 async def upload_audio(meeting_id: str, background_tasks: BackgroundTasks, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     """Upload audio file for a meeting and start processing."""
+    # ---- Email verification gate ----
+    if not is_email_verified(user):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "email_not_verified",
+                "message": "Te rugăm să îți verifici adresa de email înainte de a folosi aplicația.",
+            }
+        )
+
     # ---- Plan quota gate (minute-based) ----
     user = await reset_monthly_if_needed(user)
     plan_key, used_minutes, limit_minutes = get_plan_quota(user)

@@ -72,6 +72,14 @@ export default function HomeScreen() {
     return <Redirect href="/welcome" />;
   }
 
+  // Email verification gate — unverified users land on /verify-email and
+  // can't reach Home until they confirm. `email_verified === undefined` (older
+  // cached user payloads) is treated as verified to avoid locking out existing
+  // users who registered before this flow shipped.
+  if (user && user.email_verified === false) {
+    return <Redirect href="/verify-email" />;
+  }
+
   const currentPlan = PRICING_PLANS.find((p) => p.tier === user?.plan) || PRICING_PLANS[0];
   const usedMinutes = Math.floor(usageData?.used ?? user?.minutes_used_this_month ?? 0);
   const limitMinutes = usageData?.limit ?? user?.minutes_limit_this_month ?? currentPlan.minutes_limit;

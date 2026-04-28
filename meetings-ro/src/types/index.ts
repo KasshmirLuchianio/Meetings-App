@@ -25,6 +25,7 @@ export interface User {
   name: string;
   company?: string;
   plan: PricingTier;
+  email_verified?: boolean;
   minutes_used_this_month: number;
   minutes_limit_this_month: number;
   created_at: string;
