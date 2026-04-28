@@ -16,7 +16,6 @@
     "ios": {
       "bundleIdentifier": "app.meetingsro.meetings",
       "buildNumber": "1",
-      "minimumOsVersion": "13.0",
       "supportsTablet": false,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Aplicația necesită acces la microfon pentru a înregistra ședințele.",
@@ -47,7 +46,6 @@
     "android": {
       "package": "app.meetingsro.meetings",
       "versionCode": 1,
-      "targetSdkVersion": 34,
       "permissions": [
         "RECORD_AUDIO",
         "INTERNET",
@@ -73,7 +71,8 @@
         {
           "microphonePermission": "Aplicația necesită acces la microfon pentru a înregistra ședințele."
         }
-      ]
+      ],
+      "@sentry/react-native"
     ],
     "extra": {
       "router": {
