@@ -637,6 +637,47 @@ async def admin_delete_all_users(admin: dict = Depends(require_admin)):
     return {"message": f"All users deleted", "deleted": result.deleted_count}
 
 
+# ⚠️ TEMPORARY — remove after fresh-flow testing is done.
+# Auth via shared secret rather than admin role since no admin user exists yet.
+@app.delete("/api/admin/cleanup-test-users")
+async def cleanup_test_users(secret: str):
+    """Temporary endpoint to clean test users + their meetings. DELETE AFTER USE."""
+    expected = os.environ.get("ADMIN_CLEANUP_SECRET", "")
+    if not expected or secret != expected:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    test_emails = [
+        "vladgrigorov1@gmail.com",
+    ]
+
+    # Look up user IDs first so we can purge their meetings too
+    users = await users_col.find(
+        {"email": {"$in": test_emails}},
+        {"_id": 1, "email": 1},
+    ).to_list(None)
+
+    # meetings.user_id is stored as STRING (see create_meeting), so stringify
+    user_id_strs = [str(u["_id"]) for u in users]
+
+    meetings_result = await meetings_col.delete_many(
+        {"user_id": {"$in": user_id_strs}}
+    ) if user_id_strs else None
+
+    users_result = await users_col.delete_many(
+        {"email": {"$in": test_emails}}
+    )
+
+    print(f"[CleanupTestUsers] Deleted {users_result.deleted_count} user(s), "
+          f"{meetings_result.deleted_count if meetings_result else 0} meeting(s) "
+          f"for emails {test_emails}")
+
+    return {
+        "deleted_users":    users_result.deleted_count,
+        "deleted_meetings": meetings_result.deleted_count if meetings_result else 0,
+        "emails":           test_emails,
+    }
+
+
 @app.get("/api/auth/me")
 async def auth_me(user: dict = Depends(get_current_user)):
     """Get current authenticated user."""
