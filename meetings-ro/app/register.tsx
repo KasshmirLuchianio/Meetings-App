@@ -78,7 +78,7 @@ export default function RegisterScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      await register(name.trim(), email.trim(), password, company.trim() || undefined);
+      const registeredUser = await register(name.trim(), email.trim(), password, company.trim() || undefined);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
       // After registration, create tenant if organization flow
@@ -100,10 +100,15 @@ export default function RegisterScreen() {
         }
       }
 
-      // Newly-registered users are unverified — drop straight onto the
-      // verification screen. The Home redirect would do the same thing,
-      // but going direct avoids a flicker.
-      router.replace('/verify-email');
+      // Branch on the user payload returned by AuthContext.register().
+      // For the new backend this is always email_verified: false, so we go
+      // to /verify-email. The explicit `=== true` check makes us bullet-proof
+      // against an undefined field too (defensive — old payloads).
+      if (registeredUser && registeredUser.email_verified === true) {
+        router.replace('/');
+      } else {
+        router.replace('/verify-email');
+      }
     } catch (err: any) {
       setError(err.message || 'Eroare la înregistrare. Încearcă din nou.');
     } finally {
