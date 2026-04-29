@@ -637,6 +637,29 @@ async def admin_delete_all_users(admin: dict = Depends(require_admin)):
     return {"message": f"All users deleted", "deleted": result.deleted_count}
 
 
+# ⚠️ TEMPORARY — remove after testing.
+# Wipes EVERY user and meeting. Behind the same shared-secret guard as
+# cleanup-test-users so we don't accidentally nuke production.
+@app.delete("/api/admin/cleanup-all-data")
+async def cleanup_all_data(secret: str):
+    """Temporary endpoint to wipe all test data. DELETE AFTER USE."""
+    expected = os.environ.get("ADMIN_CLEANUP_SECRET", "")
+    if not expected or secret != expected:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    users_result    = await users_col.delete_many({})
+    meetings_result = await meetings_col.delete_many({})
+
+    print(f"[CleanupAll] Deleted {users_result.deleted_count} users, "
+          f"{meetings_result.deleted_count} meetings")
+
+    return {
+        "deleted_users":    users_result.deleted_count,
+        "deleted_meetings": meetings_result.deleted_count,
+        "status":           "clean",
+    }
+
+
 # ⚠️ TEMPORARY — remove after fresh-flow testing is done.
 # Auth via shared secret rather than admin role since no admin user exists yet.
 @app.delete("/api/admin/cleanup-test-users")
