@@ -10,7 +10,7 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: ./backend
     region: frankfurt  # eu-central — closest to Romania
-    plan: starter      # $7/mo — 512MB RAM, 0.5 CPU (upgrade to standard for prod)
+    plan: standard     # $25/mo — 2GB RAM, 1 CPU (sized for 4 uvicorn workers + mongod)
     branch: main
     healthCheckPath: /api/health
     autoDeploy: true
