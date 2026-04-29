@@ -33,11 +33,38 @@ import {
   DMSans_600SemiBold,
 } from '@expo-google-fonts/dm-sans';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import * as Linking from 'expo-linking';
 import { DrawerProvider } from '../src/context/DrawerContext';
-import { AuthProvider } from '../src/context/AuthContext';
+import { AuthProvider, useAuth } from '../src/context/AuthContext';
 import { RecordingProvider } from '../src/context/RecordingContext';
 import SlideDrawer from '../src/components/SlideDrawer';
 import RecordingScreen from '../src/components/RecordingScreen';
+
+/**
+ * Global deep-link handler. Lives inside <AuthProvider> so it can call
+ * refreshUser() when the user clicks the email-verification link
+ * (meetingsro:///email-verified?status=success). Catches both:
+ *   - cold-start (app opened from the link) via Linking.getInitialURL()
+ *   - warm-start (app already open) via the 'url' event listener
+ */
+function DeepLinkHandler() {
+  const { refreshUser } = useAuth();
+  useEffect(() => {
+    const onUrl = (event: { url: string }) => {
+      if (event.url && event.url.includes('email-verified')) {
+        refreshUser?.();
+      }
+    };
+    const sub = Linking.addEventListener('url', onUrl);
+    Linking.getInitialURL().then((url) => {
+      if (url && url.includes('email-verified')) {
+        refreshUser?.();
+      }
+    });
+    return () => sub.remove();
+  }, []);
+  return null;
+}
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -126,6 +153,7 @@ export default function RootLayout() {
     <ErrorBoundary>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <AuthProvider>
+          <DeepLinkHandler />
           <RecordingProvider>
             <DrawerProvider>
               <View style={{ flex: 1 }}>
@@ -146,6 +174,7 @@ export default function RootLayout() {
                   <Stack.Screen name="login" />
                   <Stack.Screen name="register" />
                   <Stack.Screen name="verify-email" options={{ animation: 'fade' }} />
+                  <Stack.Screen name="email-verified" options={{ animation: 'fade', headerShown: false }} />
                   <Stack.Screen name="forgot-password" />
                   <Stack.Screen name="pricing" options={{ animation: 'slide_from_bottom' }} />
                   <Stack.Screen name="browse" />

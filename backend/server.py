@@ -837,7 +837,9 @@ async def reset_password(request: Request, req: ResetPasswordRequest):
 # Returns a small HTML page that tries the deep link AND shows a fallback,
 # in case the user opens the email on a desktop where meetingsro:// is not registered.
 def _verification_redirect_page(status: str) -> str:
-    deep_link = f"meetingsro://email-verified?status={status}"
+    # Triple slash → empty host, /email-verified path. Expo Router routes
+    # path-style deep links via its file-based routing.
+    deep_link = f"meetingsro:///email-verified?status={status}"
     if status == "success":
         title = "✓ Email verificat"
         body  = "Contul tău Meetings.ro este activ. Te poți întoarce în aplicație."

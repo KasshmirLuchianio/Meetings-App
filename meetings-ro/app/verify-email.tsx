@@ -22,6 +22,9 @@ export default function VerifyEmailScreen() {
   const [resent, setResent] = useState(false);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState('');
+  // Bumped each time handleCheckNow finishes — lets a separate effect
+  // observe "the check just completed and user is still unverified".
+  const [lastCheckTime, setLastCheckTime] = useState(0);
 
   // Animations — entrance fade/slide + ambient pulse on the envelope
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -106,16 +109,24 @@ export default function VerifyEmailScreen() {
     setChecking(true);
     setError('');
     await refreshUser();
+    setLastCheckTime(Date.now());
     setChecking(false);
-    // Note: user state may not have updated synchronously — the auto-redirect
-    // useEffect above handles the success path. Show error only if still unverified.
-    setTimeout(() => {
-      if (!user?.email_verified) {
-        setError('Emailul nu a fost verificat încă. Verifică inbox-ul.');
-        setTimeout(() => setError(''), 3000);
-      }
-    }, 250);
+    // Two effects below handle the result:
+    //   - if email_verified flips to true → auto-redirect to /
+    //   - if it stayed false → error effect on lastCheckTime shows the message
   };
+
+  // Show the "not yet" error AFTER a check completes and user state has had
+  // time to settle. Reading user.email_verified here is safe because this
+  // effect re-runs whenever lastCheckTime changes (triggered post-refreshUser).
+  useEffect(() => {
+    if (lastCheckTime > 0 && !user?.email_verified) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      setError('Emailul nu a fost verificat încă. Verifică inbox-ul și apasă pe link.');
+      const t = setTimeout(() => setError(''), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [lastCheckTime]);
 
   const handleLogout = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
