@@ -21,7 +21,9 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
+import base64
 import aiofiles
+import httpx
 import stripe
 import jwt
 import bcrypt
@@ -53,6 +55,196 @@ STRIPE_PRICES = {
 
 # ==================== RESEND (Email) ====================
 resend.api_key = os.environ.get("RESEND_API_KEY")
+
+# ==================== SMARTBILL ====================
+SMARTBILL_EMAIL = "vladgrigorov1@gmail.com"
+SMARTBILL_API_KEY = os.environ.get("SMARTBILL_API_KEY", "")
+SMARTBILL_CUI = "46076724"
+SMARTBILL_SERIES = "Meetings"
+SMARTBILL_BASE_URL = "https://ws.smartbill.ro/SBORO/api"
+
+EUR_TO_RON = 4.97
+PLAN_RON_PRICES = {
+    "pro": round(19 * EUR_TO_RON, 2),         # 94.43 RON
+    "enterprise": round(99 * EUR_TO_RON, 2),  # 491.03 RON
+}
+PLAN_EUR_PRICES = {"pro": 19.0, "enterprise": 99.0}
+
+
+def _smartbill_auth_header() -> str:
+    """Basic auth header for SmartBill SBORO API."""
+    token = base64.b64encode(f"{SMARTBILL_EMAIL}:{SMARTBILL_API_KEY}".encode()).decode()
+    return f"Basic {token}"
+
+
+async def create_smartbill_invoice(
+    client_name: str,
+    client_email: str,
+    client_cui: Optional[str],
+    client_address: Optional[str],
+    plan: str,  # "pro" or "enterprise"
+    issue_date: str,  # "YYYY-MM-DD"
+) -> Optional[str]:
+    """
+    Create a SmartBill invoice and return the invoice series+number (e.g. "Meetings-001").
+    Returns None on failure (non-blocking — payment already succeeded).
+    """
+    if not SMARTBILL_API_KEY:
+        print("[SmartBill] SMARTBILL_API_KEY not configured — skipping invoice creation")
+        return None
+
+    plan_key = plan.lower()
+    unit_price_ron = PLAN_RON_PRICES.get(plan_key)
+    unit_price_eur = PLAN_EUR_PRICES.get(plan_key)
+    if unit_price_ron is None:
+        print(f"[SmartBill] Unknown plan '{plan}' — skipping")
+        return None
+
+    # VAT 19% (Romania standard rate)
+    vat_rate = 19.0
+    vat_amount = round(unit_price_ron * vat_rate / 100, 2)
+    total_ron = round(unit_price_ron + vat_amount, 2)
+
+    product_name = f"Abonament Meetings.ro {plan.capitalize()} (1 lună)"
+    invoice_payload = {
+        "companyVatCode": SMARTBILL_CUI,
+        "client": {
+            "name": client_name or client_email,
+            "vatCode": client_cui or "",
+            "address": client_address or "",
+            "email": client_email,
+            "saveToDb": False,
+            "isTaxPayer": bool(client_cui),
+        },
+        "issueDate": issue_date,
+        "seriesName": SMARTBILL_SERIES,
+        "isDraft": False,
+        "dueDate": issue_date,
+        "currency": "RON",
+        "language": "RO",
+        "precision": 2,
+        "products": [
+            {
+                "name": product_name,
+                "measuringUnitName": "buc",
+                "currency": "RON",
+                "quantity": 1,
+                "unitPrice": unit_price_ron,
+                "isTaxIncluded": False,
+                "taxName": "Normala",
+                "taxPercentage": vat_rate,
+                "isDiscount": False,
+                "saveToDb": False,
+            }
+        ],
+        "observations": (
+            f"Servicii SaaS — transcriere și analiză ședințe. "
+            f"Preț EUR: {unit_price_eur}€ × curs {EUR_TO_RON} = {unit_price_ron} RON + TVA."
+        ),
+        "paymentType": "Card",
+        "paymentDate": issue_date,
+        "useStock": False,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as hclient:
+            resp = await hclient.post(
+                f"{SMARTBILL_BASE_URL}/invoice",
+                json=invoice_payload,
+                headers={
+                    "Authorization": _smartbill_auth_header(),
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+            )
+        if resp.status_code in (200, 201):
+            data = resp.json()
+            series = data.get("series", SMARTBILL_SERIES)
+            number = data.get("number", "")
+            invoice_ref = f"{series}-{number}"
+            print(f"[SmartBill] Invoice created: {invoice_ref} for {client_email} ({plan})")
+            return invoice_ref
+        else:
+            print(f"[SmartBill] Invoice creation failed {resp.status_code}: {resp.text[:300]}")
+            return None
+    except Exception as exc:
+        print(f"[SmartBill] Exception during invoice creation: {exc}")
+        return None
+
+
+async def send_efactura_to_anaf(invoice_series: str, invoice_number: str) -> bool:
+    """
+    Send the invoice to ANAF e-Factura system via SmartBill.
+    Returns True on success.
+    """
+    if not SMARTBILL_API_KEY:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as hclient:
+            resp = await hclient.post(
+                f"{SMARTBILL_BASE_URL}/invoice/efactura",
+                json={
+                    "companyVatCode": SMARTBILL_CUI,
+                    "seriesName": invoice_series,
+                    "invoice": invoice_number,
+                    "uploadInvoice": True,
+                },
+                headers={
+                    "Authorization": _smartbill_auth_header(),
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+            )
+        if resp.status_code in (200, 201):
+            print(f"[SmartBill] e-Factura sent to ANAF: {invoice_series}-{invoice_number}")
+            return True
+        else:
+            print(f"[SmartBill] e-Factura failed {resp.status_code}: {resp.text[:200]}")
+            return False
+    except Exception as exc:
+        print(f"[SmartBill] e-Factura exception: {exc}")
+        return False
+
+
+async def _create_and_save_invoice(user_email: str, plan: str, issue_date: str) -> None:
+    """
+    Full invoice flow: look up user billing info → create SmartBill invoice →
+    optionally send e-Factura → save invoice record to MongoDB.
+    Designed to be called as asyncio.create_task() so it never blocks Stripe webhook response.
+    """
+    try:
+        user = await db.users.find_one({"email": user_email})
+        billing_name = (user or {}).get("billing_name", "") or user_email
+        billing_cui = (user or {}).get("billing_cui", "")
+        billing_address = (user or {}).get("billing_address", "")
+
+        invoice_ref = await create_smartbill_invoice(
+            client_name=billing_name,
+            client_email=user_email,
+            client_cui=billing_cui,
+            client_address=billing_address,
+            plan=plan,
+            issue_date=issue_date,
+        )
+
+        if invoice_ref:
+            # Optionally push to ANAF e-Factura (best-effort)
+            parts = invoice_ref.split("-", 1)
+            if len(parts) == 2:
+                await send_efactura_to_anaf(parts[0], parts[1])
+
+        # Persist invoice record regardless of SmartBill success
+        await db.invoices.insert_one({
+            "user_email": user_email,
+            "plan": plan,
+            "amount_ron": PLAN_RON_PRICES.get(plan.lower()),
+            "amount_eur": PLAN_EUR_PRICES.get(plan.lower()),
+            "invoice_ref": invoice_ref,
+            "issue_date": issue_date,
+            "created_at": datetime.now(timezone.utc),
+        })
+    except Exception as exc:
+        print(f"[SmartBill] _create_and_save_invoice error for {user_email}: {exc}")
 
 # CORS Origins - includes Expo development
 CORS_ALLOWED_ORIGINS = [
@@ -507,6 +699,9 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     company: Optional[str] = None
+    billing_name: Optional[str] = None     # Full legal name / company name for invoices
+    billing_cui: Optional[str] = None      # CUI / VAT code (Romanian companies)
+    billing_address: Optional[str] = None  # Billing address for invoices
 
 
 class LoginRequest(BaseModel):
@@ -535,6 +730,9 @@ async def auth_register(request: Request, req: RegisterRequest):
         "email": req.email,
         "password_hash": hash_password(req.password),
         "company": req.company,
+        "billing_name": req.billing_name or req.name,
+        "billing_cui": req.billing_cui or "",
+        "billing_address": req.billing_address or "",
         "plan": "FREE",
         "role": "member",
         "tenant_id": None,
@@ -3847,6 +4045,14 @@ async def stripe_webhook(request: Request):
                 upsert=True,
             )
             print(f"[Stripe] User {user_email} upgraded to {plan_tier}")
+
+            # Auto-generate SmartBill invoice + e-Factura (non-blocking)
+            issue_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            asyncio.create_task(_create_and_save_invoice(
+                user_email=user_email,
+                plan=plan_tier,
+                issue_date=issue_date,
+            ))
 
     elif event["type"] == "customer.subscription.deleted":
         session = event["data"]["object"]
