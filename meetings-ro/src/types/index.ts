@@ -32,6 +32,8 @@ export interface User {
   // Enterprise / RBAC fields
   role?: UserRole;
   tenant_id?: string | null;
+  // User preferences
+  keep_audio?: boolean;  // false (default) = audio deleted after processing (GDPR)
 }
 
 export interface AuthTokens {

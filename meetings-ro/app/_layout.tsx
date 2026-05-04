@@ -182,6 +182,7 @@ export default function RootLayout() {
                   <Stack.Screen name="onboarding" />
                   <Stack.Screen name="team" options={{ headerShown: false }} />
                   <Stack.Screen name="create-org" options={{ headerShown: false }} />
+                  <Stack.Screen name="settings" options={{ headerShown: false }} />
                   <Stack.Screen name="meeting/[id]" />
                 </Stack>
                 <SlideDrawer />

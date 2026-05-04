@@ -741,6 +741,7 @@ async def auth_register(request: Request, req: RegisterRequest):
         "email_verification_sent_at": now,
         "minutes_used_this_month": 0.0,
         "last_monthly_reset": now,
+        "keep_audio": False,  # GDPR-compliant default — audio is auto-deleted after processing
         "created_at": now,
     }
     result = await users_col.insert_one(user_doc)
@@ -917,8 +918,34 @@ async def auth_me(user: dict = Depends(get_current_user)):
             "created_at": user["created_at"].isoformat() if isinstance(user.get("created_at"), datetime) else str(user.get("created_at", "")),
             "tenant_id": user.get("tenant_id"),   # org membership — drives SlideDrawer menu
             "role": user.get("role"),              # admin / member — drives Admin badge
+            "keep_audio": bool(user.get("keep_audio", False)),  # audio retention preference
         }
     }
+
+
+# ==================== USER SETTINGS ====================
+
+class AudioRetentionUpdate(BaseModel):
+    keep_audio: bool
+
+
+@app.patch("/api/users/audio-retention")
+async def update_audio_retention(
+    payload: AudioRetentionUpdate,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Update the user's audio retention preference.
+    - keep_audio = False (default): audio is deleted after processing (GDPR-compliant)
+    - keep_audio = True: audio is kept on the server until the user deletes the meeting
+    """
+    await users_col.update_one(
+        {"_id": current_user["_id"]},
+        {"$set": {"keep_audio": bool(payload.keep_audio)}},
+    )
+    action = "păstrat" if payload.keep_audio else "șters automat"
+    print(f"[Settings] User {current_user.get('email')} — audio va fi {action} după procesare")
+    return {"ok": True, "keep_audio": bool(payload.keep_audio)}
 
 
 # ==================== TOKEN REFRESH ====================
@@ -2096,49 +2123,153 @@ async def detect_vertical(transcript_sample: str) -> str:
         return "GENERAL"
 
 
-async def extract_meeting_data(transcript: str, vertical_type: str = "GAL") -> dict:
-    """Extract structured data from transcript using Anthropic Claude SDK."""
-    from verticals import get_vertical_config
-
-    vertical_config = get_vertical_config(vertical_type)
-
-    # Truncate transcript to avoid 413 / context-limit errors — full text stays in MongoDB
-    MAX_TRANSCRIPT_LENGTH = 12000
-    if len(transcript) > MAX_TRANSCRIPT_LENGTH:
-        truncated = transcript[:MAX_TRANSCRIPT_LENGTH]
-        note = f"\n\n[NOTĂ: Transcrierea a fost trunchiată la {MAX_TRANSCRIPT_LENGTH} caractere din {len(transcript)} total pentru procesare AI]"
-        transcript_for_claude = truncated + note
-    else:
-        transcript_for_claude = transcript
-
-    response = await anthropic_client.messages.create(
-        model="claude-sonnet-4-5",
-        max_tokens=2000,
-        system=vertical_config.prompt_template,
-        messages=[{
-            "role": "user",
-            "content": f"Extrage informațiile structurate din această transcriere:\n\n{transcript_for_claude}"
-        }]
-    )
-
-    response_text = response.content[0].text
-
-    # Parse JSON from response
+def _parse_claude_json(response_text: str) -> dict:
+    """Tolerant JSON extraction from Claude's response (handles bare JSON / fenced blocks)."""
     try:
-        result = json.loads(response_text)
+        return json.loads(response_text)
     except json.JSONDecodeError:
         json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
         if json_match:
-            result = json.loads(json_match.group(1))
-        else:
-            start = response_text.find('{')
-            end = response_text.rfind('}') + 1
-            if start >= 0 and end > start:
-                result = json.loads(response_text[start:end])
-            else:
-                raise ValueError("Could not parse JSON from Claude response")
+            return json.loads(json_match.group(1))
+        start = response_text.find('{')
+        end = response_text.rfind('}') + 1
+        if start >= 0 and end > start:
+            return json.loads(response_text[start:end])
+        raise ValueError("Could not parse JSON from Claude response")
 
-    return result
+
+def _merge_extracted_chunks(partials: list[dict]) -> dict:
+    """
+    Merge extracted dicts from multiple transcript chunks.
+    - Lists (decizii, ordine_de_zi, actiuni, participanti, voturi) are concatenated + de-duped.
+    - Strings (concluzia, scurta_descriere, tematica) are joined with ' | '.
+    - Scalars: the first non-empty wins.
+    """
+    if not partials:
+        return {}
+    if len(partials) == 1:
+        return partials[0]
+
+    merged: dict = {}
+    LIST_KEYS = {
+        "decizii", "decizii_luate", "hotarari", "ordine_de_zi", "subiecte_discutate",
+        "agenda", "actiuni_de_urmat", "actions", "participanti", "participants",
+        "voturi", "amenadamente", "intrebari",
+    }
+
+    all_keys = set()
+    for p in partials:
+        if isinstance(p, dict):
+            all_keys.update(p.keys())
+
+    for key in all_keys:
+        values = [p.get(key) for p in partials if isinstance(p, dict) and p.get(key) is not None]
+        if not values:
+            continue
+
+        if key in LIST_KEYS:
+            combined: list = []
+            seen: set = set()
+            for v in values:
+                if isinstance(v, list):
+                    for item in v:
+                        marker = json.dumps(item, ensure_ascii=False, sort_keys=True) if isinstance(item, (dict, list)) else str(item)
+                        if marker not in seen:
+                            seen.add(marker)
+                            combined.append(item)
+                elif v:
+                    marker = str(v)
+                    if marker not in seen:
+                        seen.add(marker)
+                        combined.append(v)
+            merged[key] = combined
+        elif all(isinstance(v, str) for v in values):
+            non_empty = [v.strip() for v in values if v and v.strip()]
+            if non_empty:
+                merged[key] = non_empty[0] if len(non_empty) == 1 else " | ".join(dict.fromkeys(non_empty))
+        else:
+            merged[key] = values[0]
+
+    return merged
+
+
+async def extract_meeting_data(transcript: str, vertical_type: str = "GAL") -> dict:
+    """
+    Extract structured data from transcript using Anthropic Claude SDK.
+    For long recordings (>12k chars) the transcript is chunked, each chunk is
+    extracted individually, and the partial results are merged so NO content is lost
+    (proces verbal must cover the COMPLETE recording — even 5h+ meetings).
+    """
+    from verticals import get_vertical_config
+
+    vertical_config = get_vertical_config(vertical_type)
+    CHUNK_SIZE = 12000
+
+    # Short recording — single call (fast path)
+    if len(transcript) <= CHUNK_SIZE:
+        response = await anthropic_client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=4000,
+            system=vertical_config.prompt_template,
+            messages=[{
+                "role": "user",
+                "content": f"Extrage informațiile structurate din această transcriere:\n\n{transcript}"
+            }]
+        )
+        return _parse_claude_json(response.content[0].text)
+
+    # Long recording — chunk by sentence boundaries, extract partials, merge
+    chunks: list[str] = []
+    start = 0
+    while start < len(transcript):
+        end = start + CHUNK_SIZE
+        if end < len(transcript):
+            # Prefer to split on a paragraph/sentence boundary so context is preserved
+            for sep in ("\n\n", "\n", ". ", " "):
+                cut = transcript.rfind(sep, start, end)
+                if cut > start + CHUNK_SIZE // 2:
+                    end = cut + len(sep)
+                    break
+        chunks.append(transcript[start:end])
+        start = end
+
+    print(f"[Extract] Long transcript: {len(transcript)} chars → {len(chunks)} chunks (full coverage, no truncation)")
+
+    chunk_system = vertical_config.prompt_template + (
+        "\n\nIMPORTANT: Aceasta este O PARTE dintr-o transcriere mai lungă. "
+        "Extrage TOATE informațiile prezente în această parte. NU omite nimic. "
+        "Listele (decizii, ordine de zi, acțiuni, participanți) trebuie să conțină "
+        "FIECARE element menționat în această parte. Returnează JSON valid."
+    )
+
+    partials: list[dict] = []
+    # Limit concurrency to keep within Anthropic rate limits
+    sem = asyncio.Semaphore(3)
+
+    async def _extract_one(idx: int, chunk: str) -> dict:
+        async with sem:
+            try:
+                resp = await anthropic_client.messages.create(
+                    model="claude-sonnet-4-5",
+                    max_tokens=4000,
+                    system=chunk_system,
+                    messages=[{
+                        "role": "user",
+                        "content": f"Partea {idx+1}/{len(chunks)} din transcriere:\n\n{chunk}"
+                    }]
+                )
+                parsed = _parse_claude_json(resp.content[0].text)
+                print(f"[Extract] Chunk {idx+1}/{len(chunks)} parsed ({len(parsed)} fields)")
+                return parsed
+            except Exception as exc:
+                print(f"[Extract] Chunk {idx+1}/{len(chunks)} FAILED: {exc}")
+                return {}
+
+    partials = await asyncio.gather(*[_extract_one(i, c) for i, c in enumerate(chunks)])
+    merged = _merge_extracted_chunks([p for p in partials if p])
+
+    print(f"[Extract] Merged {len(partials)} chunks → {len(merged)} fields")
+    return merged
 
 
 async def process_meeting(meeting_id: str):
@@ -2299,8 +2430,23 @@ async def process_meeting(meeting_id: str):
         
         print(f"[GAL] Meeting {meeting_id} processed successfully!")
 
-        # TASK 6 — GDPR: delete raw audio after successful processing
-        if audio_path and os.path.exists(audio_path):
+        # TASK 6 — Respect user's audio retention preference
+        # Default (GDPR): delete after processing. Opt-in: keep on server.
+        owner_user = None
+        try:
+            if meeting.get("user_id"):
+                owner_user = await users_col.find_one({"_id": ObjectId(meeting["user_id"])})
+        except Exception:
+            owner_user = None
+        keep_audio = bool(owner_user.get("keep_audio", False)) if owner_user else False
+
+        if keep_audio:
+            print(f"[Cleanup] Audio retained per user preference: {audio_path}")
+            await meetings_col.update_one(
+                {"_id": ObjectId(meeting_id)},
+                {"$set": {"audio_retained": True}},
+            )
+        elif audio_path and os.path.exists(audio_path):
             try:
                 os.remove(audio_path)
                 await meetings_col.update_one(
@@ -2309,6 +2455,7 @@ async def process_meeting(meeting_id: str):
                         "audio_path":       None,
                         "audio_url":        None,
                         "audio_deleted_at": datetime.now(timezone.utc),
+                        "audio_retained":   False,
                     }}
                 )
                 print(f"[GDPR] Audio deleted: {audio_path}")

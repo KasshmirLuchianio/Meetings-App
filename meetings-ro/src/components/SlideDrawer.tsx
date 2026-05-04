@@ -1,10 +1,10 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, Pressable, Animated, Dimensions, StyleSheet, Alert } from 'react-native';
+import { View, Text, Pressable, Animated, Dimensions, StyleSheet, Alert, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
-import { Home, FolderOpen, Calendar, X, Crown, LogOut, CreditCard, Trash2, Users, Building2 } from 'lucide-react-native';
+import { Home, FolderOpen, Calendar, X, Crown, LogOut, CreditCard, Trash2, Users, Building2, Settings } from 'lucide-react-native';
 import { COLORS } from '../constants/theme';
 import { API_BASE_URL } from '../constants/config';
 import { useDrawer } from '../context/DrawerContext';
@@ -101,19 +101,24 @@ export default function SlideDrawer() {
 
   if (!isAuthenticated) return null;
 
+  // Wrap in Modal so touches are FULLY isolated from underlying screens —
+  // prevents X button press from bubbling through to meeting cards (long-press handlers).
   return (
-    <>
-      {/* Overlay — only blocks touches when open */}
-      {isOpen && (
-        <Pressable
-          style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 998 }]}
-          onPress={handleClose}
-        />
-      )}
+    <Modal
+      visible={isOpen}
+      transparent
+      animationType="none"
+      onRequestClose={handleClose}
+      statusBarTranslucent
+    >
+      {/* Overlay — captures all touches behind drawer */}
+      <Pressable
+        style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.5)' }]}
+        onPress={handleClose}
+      />
 
-      {/* Drawer */}
+      {/* Drawer — receives its own touch events; tap on X stays inside Modal */}
       <Animated.View
-        pointerEvents={isOpen ? 'auto' : 'none'}
         style={[
           styles.drawer,
           { transform: [{ translateX }], paddingTop: insets.top },
@@ -127,7 +132,15 @@ export default function SlideDrawer() {
                 {user?.name?.charAt(0)?.toUpperCase() || 'U'}
               </Text>
             </View>
-            <Pressable onPress={handleClose} style={styles.closeButton}>
+            <Pressable
+              onPress={(e) => {
+                // Stop propagation in case any wrapper grabs the event
+                e?.stopPropagation?.();
+                handleClose();
+              }}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              style={styles.closeButton}
+            >
               <X size={24} color={COLORS.navy} />
             </Pressable>
           </View>
@@ -182,6 +195,11 @@ export default function SlideDrawer() {
             <Text style={styles.menuText}>Planul meu</Text>
           </Pressable>
 
+          <Pressable onPress={() => handleNavigate('/settings')} style={styles.menuItem}>
+            <Settings size={20} color={COLORS.navy} />
+            <Text style={styles.menuText}>Setări</Text>
+          </Pressable>
+
           <View style={styles.separator} />
 
           <Pressable onPress={handleLogout} style={styles.menuItem}>
@@ -202,7 +220,7 @@ export default function SlideDrawer() {
           <Text style={styles.footerText}>Enterprise Platform</Text>
         </View>
       </Animated.View>
-    </>
+    </Modal>
   );
 }
 

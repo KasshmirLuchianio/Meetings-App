@@ -6,6 +6,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import * as MediaLibrary from 'expo-media-library';
 import * as SecureStore from 'expo-secure-store';
 import {
   RefreshCw, Download, FileText, Sparkles, Users,
@@ -246,6 +247,48 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
     loadMeetingData(false);
   };
 
+  /**
+   * Save downloaded file to device storage (visible in Files app / gallery).
+   * GDPR-compliant: only saves what the user explicitly downloaded.
+   */
+  const saveFileToDevice = async (fileUri: string, filename: string, mimeType: string) => {
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permisiune necesară',
+          'Pentru a salva fișierul pe dispozitiv, trebuie să acorzi permisiunea de acces la galerie.',
+        );
+        return;
+      }
+
+      // Copy to documentDirectory/downloads first (persistent, app-private)
+      const downloadDir = FileSystem.documentDirectory + 'downloads/';
+      await FileSystem.makeDirectoryAsync(downloadDir, { intermediates: true });
+      const localUri = downloadDir + filename;
+      await FileSystem.copyAsync({ from: fileUri, to: localUri });
+
+      // Try to surface in the device Files app via MediaLibrary
+      // (Android: visible in Files; iOS: limited — falls back to share sheet)
+      try {
+        await MediaLibrary.saveToLibraryAsync(localUri);
+      } catch {
+        // Some platforms don't allow non-media files in MediaLibrary —
+        // file is still saved in app's documentDirectory/downloads/
+      }
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(
+        'Descărcat cu succes',
+        `Fișierul "${filename}" a fost salvat pe dispozitiv.`,
+        [{ text: 'OK' }]
+      );
+    } catch (e) {
+      console.error('[Download] save error:', e);
+      Alert.alert('Eroare', 'Nu am putut salva fișierul pe dispozitiv.');
+    }
+  };
+
   const handleExport = async (format: 'pdf' | 'docx' | 'pv') => {
     if (!meeting || !FINAL_STATUSES.slice(0, 2).includes(meeting.status)) {
       Alert.alert('Export indisponibil', 'Disponibil doar pentru intalniri finalizate.');
@@ -254,12 +297,14 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setExporting(format);
     try {
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (!isAvailable) { Alert.alert('Eroare', 'Sharing nu e disponibil.'); return; }
-
       const endpoint = format === 'pv' ? 'export/proces-verbal' : `export/${format}`;
       const fileExt = format === 'pv' ? 'docx' : format;
       const filePrefix = format === 'pv' ? 'proces_verbal' : 'meeting';
+      const titleSafe = (meeting.title || 'meeting').replace(/[^\w\-.]/g, '_').slice(0, 60);
+      const filename = `${filePrefix}_${titleSafe}.${fileExt}`;
+      const mimeType = format === 'pdf'
+        ? 'application/pdf'
+        : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
       const url = `${API_BASE_URL}/api/meetings/${meetingId}/${endpoint}`;
       const fileUri = FileSystem.cacheDirectory + `${filePrefix}_${meetingId}.${fileExt}`;
@@ -268,15 +313,40 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
         headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
       });
       if (dl.status !== 200) throw new Error('Download failed');
-      await Sharing.shareAsync(dl.uri, {
-        mimeType: format === 'pdf'
-          ? 'application/pdf'
-          : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        dialogTitle: format === 'pv'
-          ? `Proces-Verbal — ${meeting.title || 'Sedinta'}`
-          : `${meeting.title || 'Raport'} — ${format.toUpperCase()}`,
-      });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      // Show options: Save to device OR Share
+      Alert.alert(
+        'Exportă fișierul',
+        `Ce dorești să faci cu "${filename}"?`,
+        [
+          {
+            text: 'Salvează pe dispozitiv',
+            onPress: () => saveFileToDevice(dl.uri, filename, mimeType),
+          },
+          {
+            text: 'Trimite / Partajează',
+            onPress: async () => {
+              try {
+                const isAvailable = await Sharing.isAvailableAsync();
+                if (!isAvailable) {
+                  Alert.alert('Eroare', 'Sharing nu e disponibil pe acest dispozitiv.');
+                  return;
+                }
+                await Sharing.shareAsync(dl.uri, {
+                  mimeType,
+                  dialogTitle: format === 'pv'
+                    ? `Proces-Verbal — ${meeting.title || 'Sedinta'}`
+                    : `${meeting.title || 'Raport'} — ${format.toUpperCase()}`,
+                });
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              } catch {
+                Alert.alert('Eroare', 'Nu am putut partaja fișierul.');
+              }
+            },
+          },
+          { text: 'Anulează', style: 'cancel' },
+        ],
+      );
     } catch {
       Alert.alert('Eroare export', 'Nu am putut exporta fisierul.');
     } finally {
