@@ -71,8 +71,8 @@ export default function AudioRecorder({ onRecordingComplete }: RecorderProps) {
       if (uri) {
         // ── File size check — inform user before upload ──────────────
         try {
-          const info = await FileSystem.getInfoAsync(uri, { size: true });
-          if (info.exists && info.size) {
+          const info = await FileSystem.getInfoAsync(uri);
+          if (info.exists && 'size' in info && info.size) {
             const sizeMB = info.size / BYTES_PER_MB;
             if (sizeMB > FILE_SIZE_WARN_MB) {
               Alert.alert(
