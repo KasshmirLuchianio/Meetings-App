@@ -14,7 +14,7 @@
       "backgroundColor": "#FAF8F3"
     },
     "ios": {
-      "bundleIdentifier": "app.meetingsro.meetings",
+      "bundleIdentifier": "ro.meetingsapp.meetings",
       "buildNumber": "1",
       "supportsTablet": false,
       "infoPlist": {
@@ -44,8 +44,8 @@
       }
     },
     "android": {
-      "package": "app.meetingsro.meetings",
-      "versionCode": 3,
+      "package": "ro.meetingsapp.meetings",
+      "versionCode": 1,
       "permissions": [
         "RECORD_AUDIO",
         "INTERNET",
