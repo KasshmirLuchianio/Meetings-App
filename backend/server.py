@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 import base64
 import aiofiles
 import httpx
@@ -386,6 +387,9 @@ localities_col = db["localities"]
 users_col = db["users"]
 tenants_col = db["tenants"]
 invitations_col = db["invitations"]
+processed_events_col = db["processed_events"]  # Stripe webhook idempotency
+invoices_col = db["invoices"]
+invoice_failures_col = db["invoice_failures"]
 
 
 # ==================== AUTH HELPERS ====================
@@ -717,6 +721,14 @@ async def startup():
     await tenants_col.create_index("created_by")
     await invitations_col.create_index("token", unique=True)
     await invitations_col.create_index("expires_at", expireAfterSeconds=0)
+    # Stripe webhook idempotency — unique event IDs, auto-purge after 30 days
+    await processed_events_col.create_index("event_id", unique=True)
+    await processed_events_col.create_index("processed_at", expireAfterSeconds=2592000)
+    # Invoice tracking
+    await invoices_col.create_index("user_email")
+    await invoices_col.create_index([("created_at", -1)])
+    await invoice_failures_col.create_index("user_email")
+    await invoice_failures_col.create_index("needs_manual_review")
     await seed_default_localities()
     await create_demo_account()
     # Background: reset minute quotas on the 1st of each month at 00:00 UTC
@@ -4228,6 +4240,21 @@ async def stripe_webhook(request: Request):
         event_type = event.get("type", "<unknown>") if isinstance(event, dict) else "<unknown>"
         print(f"[Stripe:{WEBHOOK_VERSION}] Event {event_id} type={event_type}")
 
+        # ---- 2a. IDEMPOTENCY GUARD ----
+        # Stripe retries webhooks on timeout/error. Track processed events so we never
+        # double-charge users, double-create invoices, or re-trigger e-Factura submissions.
+        if event_id and event_id != "?":
+            try:
+                # Try to insert — unique index on event_id makes this atomic
+                await processed_events_col.insert_one({
+                    "event_id":     event_id,
+                    "type":         event_type,
+                    "processed_at": datetime.now(timezone.utc),
+                })
+            except DuplicateKeyError:
+                print(f"[Stripe:{WEBHOOK_VERSION}] DUPLICATE event {event_id} — already processed, skipping")
+                return {"status": "ok", "duplicate": True, "event_id": event_id}
+
         if event_type == "checkout.session.completed":
             session = (event.get("data") or {}).get("object") or {}
             user_email = (
@@ -4319,6 +4346,55 @@ async def stripe_webhook(request: Request):
         print(f"[Stripe:{WEBHOOK_VERSION}] Traceback:\n{traceback.format_exc()}")
         # Return 200 so Stripe stops retrying — error is logged and recoverable manually
         return {"status": "ok", "note": f"caught {type(exc).__name__}"}
+
+
+@app.post("/api/payments/portal")
+async def create_billing_portal_session(user: dict = Depends(get_current_user)):
+    """
+    Create a Stripe Customer Portal session.
+    Returns a URL where the user can:
+      - Update payment method (replace expired card)
+      - Cancel / pause / resume subscription
+      - View / download past invoices
+      - See upcoming charges and renewal date
+    """
+    customer_id = user.get("stripe_customer_id")
+    if not customer_id:
+        raise HTTPException(
+            status_code=400,
+            detail="no_subscription",  # frontend shows: "Nu ai un abonament activ"
+        )
+
+    # Verify the customer still exists in Stripe (mode-agnostic)
+    try:
+        stripe.Customer.retrieve(customer_id)
+    except stripe.error.InvalidRequestError as exc:
+        # Customer was created in a different mode (test vs live) — clean up
+        await users_col.update_one(
+            {"_id": user["_id"]},
+            {"$unset": {"stripe_customer_id": "", "stripe_subscription_id": ""}},
+        )
+        raise HTTPException(status_code=400, detail="customer_mode_mismatch") from exc
+    except Exception as exc:
+        print(f"[Portal] Customer {customer_id} retrieve failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(status_code=500, detail="stripe_unreachable") from exc
+
+    try:
+        session = stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url="https://meetings-ro-api.onrender.com/payment-success",
+        )
+        # session is a StripeObject — use dict access to avoid SDK __getattr__ bug
+        url = session.to_dict().get("url") if hasattr(session, "to_dict") else session.get("url")
+        if not url:
+            raise HTTPException(status_code=500, detail="no_url_in_response")
+        print(f"[Portal] Created session for customer={customer_id} user={user.get('email')}")
+        return {"url": url}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[Portal] Failed to create session for {customer_id}: {type(exc).__name__}: {exc}")
+        raise HTTPException(status_code=500, detail=f"portal_create_failed: {type(exc).__name__}") from exc
 
 
 @app.get("/payment-success")

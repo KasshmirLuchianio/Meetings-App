@@ -12,7 +12,8 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { ArrowLeft, ShieldCheck } from 'lucide-react-native';
+import * as Linking from 'expo-linking';
+import { ArrowLeft, ShieldCheck, CreditCard, ExternalLink } from 'lucide-react-native';
 import { COLORS } from '../src/constants/theme';
 import { API_BASE_URL } from '../src/constants/config';
 import { useAuth } from '../src/context/AuthContext';
@@ -25,6 +26,55 @@ export default function SettingsScreen() {
 
   const [keepAudio, setKeepAudio] = useState<boolean>(user?.keep_audio ?? false);
   const [saving, setSaving] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
+
+  const handleManageSubscription = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setPortalLoading(true);
+    try {
+      const res = await authenticatedFetch(`${API_BASE_URL}/api/payments/portal`, {
+        method: 'POST',
+      });
+      if (res.status === 400) {
+        const err = await res.json().catch(() => ({}));
+        if (err?.detail === 'no_subscription') {
+          Alert.alert(
+            'Niciun abonament activ',
+            'Nu ai un abonament activ momentan. Pentru a gestiona facturarea, alege întâi un plan din ecranul Planuri.',
+            [
+              { text: 'Anulează', style: 'cancel' },
+              { text: 'Vezi planuri', onPress: () => router.push('/pricing') },
+            ],
+          );
+          return;
+        }
+        if (err?.detail === 'customer_mode_mismatch') {
+          Alert.alert(
+            'Necesită reactivare',
+            'Abonamentul tău trebuie reactivat. Te rugăm să alegi din nou planul dorit.',
+            [
+              { text: 'Anulează', style: 'cancel' },
+              { text: 'Vezi planuri', onPress: () => router.push('/pricing') },
+            ],
+          );
+          return;
+        }
+        throw new Error(err?.detail || 'Eroare server');
+      }
+      if (!res.ok) {
+        throw new Error('Eroare server');
+      }
+      const { url } = await res.json();
+      if (!url) throw new Error('Răspuns invalid');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await Linking.openURL(url);
+    } catch (e: any) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Eroare', e?.message || 'Nu am putut deschide pagina de gestionare.');
+    } finally {
+      setPortalLoading(false);
+    }
+  };
 
   const handleAudioRetentionChange = async (value: boolean) => {
     // Optimistic update
@@ -132,6 +182,32 @@ export default function SettingsScreen() {
           </View>
         )}
 
+        {/* ABONAMENT Section */}
+        <Text style={[styles.sectionTitle, { marginTop: 32 }]}>ABONAMENT</Text>
+
+        <Pressable
+          onPress={handleManageSubscription}
+          disabled={portalLoading}
+          style={({ pressed }) => [
+            styles.card,
+            styles.actionRow,
+            pressed && { opacity: 0.7 },
+          ]}
+        >
+          <View style={styles.actionIconWrap}>
+            <CreditCard size={20} color={COLORS.navy} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowLabel}>Gestionează abonamentul</Text>
+            <Text style={styles.rowDescription}>
+              Schimbă cardul, anulează abonamentul, descarcă facturi.
+            </Text>
+          </View>
+          {portalLoading
+            ? <ActivityIndicator size="small" color={COLORS.navy} />
+            : <ExternalLink size={18} color="#9CA3AF" />}
+        </Pressable>
+
         {/* CONT Section */}
         <Text style={[styles.sectionTitle, { marginTop: 32 }]}>CONT</Text>
 
@@ -222,6 +298,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B6560',
     lineHeight: 17,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  actionIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   savingRow: {
     flexDirection: 'row',
