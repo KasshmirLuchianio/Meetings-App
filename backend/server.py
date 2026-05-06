@@ -4149,6 +4149,7 @@ async def create_checkout_session(req: CheckoutRequest, user: dict = Depends(get
 @app.post("/api/payments/webhook")
 async def stripe_webhook(request: Request):
     """Handle Stripe webhook events."""
+    print(f"[Stripe] Webhook received. Secret configured: {bool(STRIPE_WEBHOOK_SECRET)}, Key configured: {bool(stripe.api_key)}")
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
 
@@ -4157,12 +4158,15 @@ async def stripe_webhook(request: Request):
 
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
-    except ValueError:
+    except ValueError as e:
+        print(f"[Stripe] Invalid payload: {e}")
         raise HTTPException(status_code=400, detail="Invalid payload")
-    except stripe.error.SignatureVerificationError:
+    except stripe.error.SignatureVerificationError as e:
+        print(f"[Stripe] Invalid signature: {e}")
         raise HTTPException(status_code=400, detail="Invalid signature")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Webhook error: {str(e)}")
+        print(f"[Stripe] UNHANDLED construct_event error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"Webhook error: {str(e)}")
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
