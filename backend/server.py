@@ -46,14 +46,26 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 # ==================== STRIPE ====================
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
-# Stripe price IDs — TEST mode (sk_test_*).
-# When switching to LIVE, recreate equivalent products+prices in live mode and replace these.
-STRIPE_PRICES = {
+# Stripe price IDs — auto-switches between test and live based on STRIPE_SECRET_KEY prefix.
+# To rotate prices: create new ones in Stripe Dashboard, paste IDs here.
+_IS_LIVE_MODE = (stripe.api_key or "").startswith("sk_live_")
+
+_STRIPE_PRICES_TEST = {
     "pro_monthly":        "price_1TU6nxHa4KY3ww8w2ZOsZI6o",  # 19.00 EUR / month
-    "pro_yearly":         "price_1TU6nyHa4KY3ww8wd4V3qlc5",  # 182.00 EUR / year (~20% off)
+    "pro_yearly":         "price_1TU6nyHa4KY3ww8wd4V3qlc5",  # 182.00 EUR / year
     "enterprise_monthly": "price_1TU6nyHa4KY3ww8wZ2mxivkH",  # 99.00 EUR / month
-    "enterprise_yearly":  "price_1TU6nzHa4KY3ww8w1cOySoXj",  # 950.00 EUR / year (~20% off)
+    "enterprise_yearly":  "price_1TU6nzHa4KY3ww8w1cOySoXj",  # 950.00 EUR / year
 }
+
+_STRIPE_PRICES_LIVE = {
+    "pro_monthly":        "price_1TIOnGHa4KY3ww8wNuZfnCvN",  # 19.99 EUR / month
+    "pro_yearly":         "price_1TIOneHa4KY3ww8wkmyVhjDP",  # 182.00 EUR / year
+    "enterprise_monthly": "price_1TIOnuHa4KY3ww8wYMLsIRIw",  # 99.00 EUR / month
+    "enterprise_yearly":  "price_1TUDY8Ha4KY3ww8wpaalO5bF",  # 950.00 EUR / year (replaces buggy /month)
+}
+
+STRIPE_PRICES = _STRIPE_PRICES_LIVE if _IS_LIVE_MODE else _STRIPE_PRICES_TEST
+print(f"[Stripe] mode={'LIVE' if _IS_LIVE_MODE else 'TEST'}, using {len(STRIPE_PRICES)} price IDs")
 
 # ==================== RESEND (Email) ====================
 resend.api_key = os.environ.get("RESEND_API_KEY")
@@ -69,7 +81,7 @@ EUR_TO_RON = 4.97
 # Per-billing-cycle price tables. Keys: "<tier>" = monthly, "<tier>_yearly" = annual.
 # Used by SmartBill invoice generation so yearly subscribers get correct annual amount.
 PLAN_EUR_PRICES = {
-    "pro":              19.0,
+    "pro":              19.99,   # matches live Stripe price (test mode is 19.00)
     "pro_yearly":       182.0,
     "enterprise":       99.0,
     "enterprise_yearly": 950.0,

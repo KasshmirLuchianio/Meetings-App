@@ -59,7 +59,7 @@ export const PRICING_PLANS = [
     id: "pro",
     tier: 'PRO' as const,
     name: 'Pro',
-    price_monthly: 19,
+    price_monthly: 19.99,
     price_yearly: 182,
     audio_hours: 5,
     minutes_limit: 300,
