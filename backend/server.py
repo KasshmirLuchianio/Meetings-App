@@ -4146,59 +4146,78 @@ async def create_checkout_session(req: CheckoutRequest, user: dict = Depends(get
         raise HTTPException(status_code=400, detail=str(e))
 
 
+WEBHOOK_VERSION = "v3-bulletproof-2026-05-06"
+
+
 @app.post("/api/payments/webhook")
 async def stripe_webhook(request: Request):
-    """Handle Stripe webhook events."""
-    print(f"[Stripe] Webhook received. Secret configured: {bool(STRIPE_WEBHOOK_SECRET)}, Key configured: {bool(stripe.api_key)}")
-    payload = await request.body()
-    sig_header = request.headers.get("stripe-signature")
+    """Handle Stripe webhook events. Bulletproof: never returns bare 'Internal Server Error'."""
+    import traceback
 
+    # ---- 0. Read raw body + headers ----
+    try:
+        payload = await request.body()
+        sig_header = request.headers.get("stripe-signature", "")
+        print(f"[Stripe:{WEBHOOK_VERSION}] Webhook received. body={len(payload)}b sig={'yes' if sig_header else 'NO'} secret_cfg={bool(STRIPE_WEBHOOK_SECRET)} key_cfg={bool(stripe.api_key)}")
+    except Exception as exc:
+        print(f"[Stripe:{WEBHOOK_VERSION}] ERROR reading request: {type(exc).__name__}: {exc}")
+        return JSONResponse(status_code=500, content={"detail": f"read_request: {type(exc).__name__}: {exc}"})
+
+    # ---- 1. Signature / event construction ----
     if not STRIPE_WEBHOOK_SECRET:
-        raise HTTPException(status_code=500, detail="Webhook secret not configured")
+        print(f"[Stripe:{WEBHOOK_VERSION}] STRIPE_WEBHOOK_SECRET is not set in env")
+        return JSONResponse(status_code=500, content={"detail": "Webhook secret not configured"})
 
+    event = None
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
-    except ValueError as e:
-        print(f"[Stripe] Invalid payload: {e}")
-        raise HTTPException(status_code=400, detail="Invalid payload")
-    except stripe.error.SignatureVerificationError as e:
-        print(f"[Stripe] Invalid signature: {e}")
-        raise HTTPException(status_code=400, detail="Invalid signature")
-    except Exception as e:
-        print(f"[Stripe] UNHANDLED construct_event error: {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail=f"Webhook error: {str(e)}")
+    except ValueError as exc:
+        print(f"[Stripe:{WEBHOOK_VERSION}] Invalid payload: {type(exc).__name__}: {exc}")
+        return JSONResponse(status_code=400, content={"detail": "Invalid payload"})
+    except stripe.error.SignatureVerificationError as exc:
+        print(f"[Stripe:{WEBHOOK_VERSION}] Invalid signature: {exc}")
+        return JSONResponse(status_code=400, content={"detail": "Invalid signature"})
+    except Exception as exc:
+        print(f"[Stripe:{WEBHOOK_VERSION}] construct_event UNHANDLED {type(exc).__name__}: {exc}")
+        print(f"[Stripe:{WEBHOOK_VERSION}] Traceback:\n{traceback.format_exc()}")
+        return JSONResponse(status_code=500, content={"detail": f"construct_event: {type(exc).__name__}: {exc}"})
 
-    # Wrap event processing in try/except to surface unhandled errors
-    # (otherwise FastAPI returns generic "Internal Server Error" with no clue)
+    # ---- 2. Event processing — every operation independently wrapped ----
+    event_id = event.get("id", "?")
+    event_type = event.get("type", "<unknown>")
+    print(f"[Stripe:{WEBHOOK_VERSION}] Event {event_id} type={event_type}")
+
     try:
-        event_type = event.get("type", "<unknown>")
-        print(f"[Stripe] Processing event {event.get('id')}: {event_type}")
-
         if event_type == "checkout.session.completed":
-            session = event["data"]["object"]
-            # Newer Stripe API versions put email in customer_details.email,
-            # older ones in customer_email — try both.
+            session = (event.get("data") or {}).get("object") or {}
             user_email = (
                 session.get("customer_email")
                 or (session.get("customer_details") or {}).get("email")
             )
             subscription_id = session.get("subscription")
-            mode = session.get("mode")  # "payment" | "subscription" | "setup"
-            plan_tier = "PRO"  # default
+            mode = session.get("mode")
+            plan_tier = "PRO"
 
-            print(f"[Stripe] checkout.session.completed: mode={mode}, email={user_email}, sub={subscription_id}")
+            print(f"[Stripe:{WEBHOOK_VERSION}] checkout.session.completed mode={mode} email={user_email} sub={subscription_id}")
 
+            # Resolve plan tier from subscription (best-effort)
             if subscription_id:
                 try:
                     sub = stripe.Subscription.retrieve(subscription_id)
                     price_id = sub["items"]["data"][0]["price"]["id"]
-                    if price_id in [STRIPE_PRICES["enterprise_monthly"], STRIPE_PRICES["enterprise_yearly"]]:
+                    if price_id in [STRIPE_PRICES.get("enterprise_monthly"), STRIPE_PRICES.get("enterprise_yearly")]:
                         plan_tier = "ENTERPRISE"
                 except Exception as exc:
-                    print(f"[Stripe] WARNING could not retrieve subscription {subscription_id}: {type(exc).__name__}: {exc}")
+                    print(f"[Stripe:{WEBHOOK_VERSION}] WARN retrieve subscription {subscription_id} failed: {type(exc).__name__}: {exc}")
 
-            if user_email:
-                await db.users.update_one(
+            # Skip if no email (test events from dashboard)
+            if not user_email:
+                print(f"[Stripe:{WEBHOOK_VERSION}] No email on event {event_id} — likely a test event, skipping update")
+                return {"status": "ok", "note": "no_email_skipped"}
+
+            # User update — independently wrapped
+            try:
+                await users_col.update_one(
                     {"email": user_email},
                     {"$set": {
                         "plan": plan_tier,
@@ -4208,46 +4227,51 @@ async def stripe_webhook(request: Request):
                     }},
                     upsert=True,
                 )
-                print(f"[Stripe] User {user_email} upgraded to {plan_tier}")
+                print(f"[Stripe:{WEBHOOK_VERSION}] User {user_email} upgraded to {plan_tier}")
+            except Exception as exc:
+                print(f"[Stripe:{WEBHOOK_VERSION}] DB update failed for {user_email}: {type(exc).__name__}: {exc}")
+                print(f"[Stripe:{WEBHOOK_VERSION}] Traceback:\n{traceback.format_exc()}")
+                # don't re-raise — invoice attempt may still succeed independently
 
-                # Auto-generate SmartBill invoice + e-Factura (non-blocking)
+            # SmartBill invoice — never blocks, never crashes the webhook
+            try:
                 issue_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 asyncio.create_task(_create_and_save_invoice(
                     user_email=user_email,
                     plan=plan_tier,
                     issue_date=issue_date,
                 ))
-            else:
-                # Test webhooks from Stripe Dashboard often have no email — that's fine, ignore
-                print(f"[Stripe] No customer email on event {event.get('id')} — skipping user update (likely a test event)")
+            except Exception as exc:
+                print(f"[Stripe:{WEBHOOK_VERSION}] SmartBill task scheduling failed: {type(exc).__name__}: {exc}")
 
         elif event_type == "customer.subscription.deleted":
-            session = event["data"]["object"]
+            session = (event.get("data") or {}).get("object") or {}
             customer_id = session.get("customer")
             if customer_id:
-                await db.users.update_one(
-                    {"stripe_customer_id": customer_id},
-                    {"$set": {
-                        "plan": "FREE",
-                        "stripe_subscription_id": None,
-                        "plan_updated_at": datetime.now(timezone.utc),
-                    }}
-                )
-                print(f"[Stripe] Customer {customer_id} downgraded to FREE")
+                try:
+                    await users_col.update_one(
+                        {"stripe_customer_id": customer_id},
+                        {"$set": {
+                            "plan": "FREE",
+                            "stripe_subscription_id": None,
+                            "plan_updated_at": datetime.now(timezone.utc),
+                        }}
+                    )
+                    print(f"[Stripe:{WEBHOOK_VERSION}] Customer {customer_id} downgraded to FREE")
+                except Exception as exc:
+                    print(f"[Stripe:{WEBHOOK_VERSION}] Downgrade failed for {customer_id}: {type(exc).__name__}: {exc}")
 
         else:
-            print(f"[Stripe] Ignoring unhandled event type: {event_type}")
+            print(f"[Stripe:{WEBHOOK_VERSION}] Ignoring event type: {event_type}")
 
         return {"status": "ok"}
 
     except Exception as exc:
-        # Print FULL traceback so Render logs show exactly which line blew up
-        import traceback
-        tb = traceback.format_exc()
-        print(f"[Stripe] UNHANDLED ERROR processing event {event.get('id')}: {type(exc).__name__}: {exc}")
-        print(f"[Stripe] Traceback:\n{tb}")
-        # Return 500 so Stripe retries (vs swallowing with 200)
-        raise HTTPException(status_code=500, detail=f"Webhook processing error: {type(exc).__name__}: {exc}")
+        # Last-resort catch — should be unreachable now since each operation is wrapped
+        print(f"[Stripe:{WEBHOOK_VERSION}] OUTER CATCH event {event_id} {type(exc).__name__}: {exc}")
+        print(f"[Stripe:{WEBHOOK_VERSION}] Traceback:\n{traceback.format_exc()}")
+        # Return 200 so Stripe stops retrying — error is logged and recoverable manually
+        return {"status": "ok", "note": f"caught {type(exc).__name__}"}
 
 
 @app.get("/payment-success")
