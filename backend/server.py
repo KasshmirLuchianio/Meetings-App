@@ -4168,58 +4168,86 @@ async def stripe_webhook(request: Request):
         print(f"[Stripe] UNHANDLED construct_event error: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=f"Webhook error: {str(e)}")
 
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        user_email = session.get("customer_email")
-        # Determine plan from price ID
-        subscription_id = session.get("subscription")
-        plan_tier = "PRO"  # default
+    # Wrap event processing in try/except to surface unhandled errors
+    # (otherwise FastAPI returns generic "Internal Server Error" with no clue)
+    try:
+        event_type = event.get("type", "<unknown>")
+        print(f"[Stripe] Processing event {event.get('id')}: {event_type}")
 
-        if subscription_id:
-            try:
-                sub = stripe.Subscription.retrieve(subscription_id)
-                price_id = sub["items"]["data"][0]["price"]["id"]
-                if price_id in [STRIPE_PRICES["enterprise_monthly"], STRIPE_PRICES["enterprise_yearly"]]:
-                    plan_tier = "ENTERPRISE"
-            except Exception:
-                pass
-
-        if user_email:
-            await db.users.update_one(
-                {"email": user_email},
-                {"$set": {
-                    "plan": plan_tier,
-                    "stripe_customer_id": session.get("customer"),
-                    "stripe_subscription_id": subscription_id,
-                    "plan_updated_at": datetime.now(timezone.utc),
-                }},
-                upsert=True,
+        if event_type == "checkout.session.completed":
+            session = event["data"]["object"]
+            # Newer Stripe API versions put email in customer_details.email,
+            # older ones in customer_email — try both.
+            user_email = (
+                session.get("customer_email")
+                or (session.get("customer_details") or {}).get("email")
             )
-            print(f"[Stripe] User {user_email} upgraded to {plan_tier}")
+            subscription_id = session.get("subscription")
+            mode = session.get("mode")  # "payment" | "subscription" | "setup"
+            plan_tier = "PRO"  # default
 
-            # Auto-generate SmartBill invoice + e-Factura (non-blocking)
-            issue_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            asyncio.create_task(_create_and_save_invoice(
-                user_email=user_email,
-                plan=plan_tier,
-                issue_date=issue_date,
-            ))
+            print(f"[Stripe] checkout.session.completed: mode={mode}, email={user_email}, sub={subscription_id}")
 
-    elif event["type"] == "customer.subscription.deleted":
-        session = event["data"]["object"]
-        customer_id = session.get("customer")
-        if customer_id:
-            await db.users.update_one(
-                {"stripe_customer_id": customer_id},
-                {"$set": {
-                    "plan": "FREE",
-                    "stripe_subscription_id": None,
-                    "plan_updated_at": datetime.now(timezone.utc),
-                }}
-            )
-            print(f"[Stripe] Customer {customer_id} downgraded to FREE")
+            if subscription_id:
+                try:
+                    sub = stripe.Subscription.retrieve(subscription_id)
+                    price_id = sub["items"]["data"][0]["price"]["id"]
+                    if price_id in [STRIPE_PRICES["enterprise_monthly"], STRIPE_PRICES["enterprise_yearly"]]:
+                        plan_tier = "ENTERPRISE"
+                except Exception as exc:
+                    print(f"[Stripe] WARNING could not retrieve subscription {subscription_id}: {type(exc).__name__}: {exc}")
 
-    return {"status": "ok"}
+            if user_email:
+                await db.users.update_one(
+                    {"email": user_email},
+                    {"$set": {
+                        "plan": plan_tier,
+                        "stripe_customer_id": session.get("customer"),
+                        "stripe_subscription_id": subscription_id,
+                        "plan_updated_at": datetime.now(timezone.utc),
+                    }},
+                    upsert=True,
+                )
+                print(f"[Stripe] User {user_email} upgraded to {plan_tier}")
+
+                # Auto-generate SmartBill invoice + e-Factura (non-blocking)
+                issue_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                asyncio.create_task(_create_and_save_invoice(
+                    user_email=user_email,
+                    plan=plan_tier,
+                    issue_date=issue_date,
+                ))
+            else:
+                # Test webhooks from Stripe Dashboard often have no email — that's fine, ignore
+                print(f"[Stripe] No customer email on event {event.get('id')} — skipping user update (likely a test event)")
+
+        elif event_type == "customer.subscription.deleted":
+            session = event["data"]["object"]
+            customer_id = session.get("customer")
+            if customer_id:
+                await db.users.update_one(
+                    {"stripe_customer_id": customer_id},
+                    {"$set": {
+                        "plan": "FREE",
+                        "stripe_subscription_id": None,
+                        "plan_updated_at": datetime.now(timezone.utc),
+                    }}
+                )
+                print(f"[Stripe] Customer {customer_id} downgraded to FREE")
+
+        else:
+            print(f"[Stripe] Ignoring unhandled event type: {event_type}")
+
+        return {"status": "ok"}
+
+    except Exception as exc:
+        # Print FULL traceback so Render logs show exactly which line blew up
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[Stripe] UNHANDLED ERROR processing event {event.get('id')}: {type(exc).__name__}: {exc}")
+        print(f"[Stripe] Traceback:\n{tb}")
+        # Return 500 so Stripe retries (vs swallowing with 200)
+        raise HTTPException(status_code=500, detail=f"Webhook processing error: {type(exc).__name__}: {exc}")
 
 
 @app.get("/payment-success")
