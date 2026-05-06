@@ -4182,12 +4182,20 @@ async def stripe_webhook(request: Request):
         print(f"[Stripe:{WEBHOOK_VERSION}] Traceback:\n{traceback.format_exc()}")
         return JSONResponse(status_code=500, content={"detail": f"construct_event: {type(exc).__name__}: {exc}"})
 
-    # ---- 2. Event processing — every operation independently wrapped ----
-    event_id = event.get("id", "?")
-    event_type = event.get("type", "<unknown>")
-    print(f"[Stripe:{WEBHOOK_VERSION}] Event {event_id} type={event_type}")
-
+    # ---- 2. Event processing — EVERYTHING inside one try/except ----
     try:
+        # Coerce stripe.Event → plain dict so .get() can never call StripeObject.__getattr__
+        if hasattr(event, "to_dict_recursive"):
+            event = event.to_dict_recursive()
+        elif hasattr(event, "to_dict"):
+            event = event.to_dict()
+        elif not isinstance(event, dict):
+            event = json.loads(json.dumps(event, default=str))
+
+        event_id = event.get("id", "?") if isinstance(event, dict) else "?"
+        event_type = event.get("type", "<unknown>") if isinstance(event, dict) else "<unknown>"
+        print(f"[Stripe:{WEBHOOK_VERSION}] Event {event_id} type={event_type}")
+
         if event_type == "checkout.session.completed":
             session = (event.get("data") or {}).get("object") or {}
             user_email = (
