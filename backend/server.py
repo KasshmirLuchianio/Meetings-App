@@ -122,8 +122,8 @@ async def create_smartbill_invoice(
         print(f"[SmartBill] Unknown plan '{plan}' interval '{interval}' — skipping")
         return None
 
-    # VAT 19% (Romania standard rate)
-    vat_rate = 19.0
+    # VAT 21% (Romania standard rate from 1 August 2025; was 19% before)
+    vat_rate = 21.0
     vat_amount = round(unit_price_ron * vat_rate / 100, 2)
     total_ron = round(unit_price_ron + vat_amount, 2)
 
