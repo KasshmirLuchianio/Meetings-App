@@ -46,11 +46,13 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 # ==================== STRIPE ====================
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
+# Stripe price IDs — TEST mode (sk_test_*).
+# When switching to LIVE, recreate equivalent products+prices in live mode and replace these.
 STRIPE_PRICES = {
-    "pro_monthly": "price_1TIOnGHa4KY3ww8wNuZfnCvN",
-    "pro_yearly": "price_1TIOneHa4KY3ww8wkmyVhjDP",
-    "enterprise_monthly": "price_1TIOnuHa4KY3ww8wYMLsIRIw",
-    "enterprise_yearly": "price_1TIOoCHa4KY3ww8wjDYteZ14",
+    "pro_monthly":        "price_1TU6nxHa4KY3ww8w2ZOsZI6o",  # 19.00 EUR / month
+    "pro_yearly":         "price_1TU6nyHa4KY3ww8wd4V3qlc5",  # 182.00 EUR / year (~20% off)
+    "enterprise_monthly": "price_1TU6nyHa4KY3ww8wZ2mxivkH",  # 99.00 EUR / month
+    "enterprise_yearly":  "price_1TU6nzHa4KY3ww8w1cOySoXj",  # 950.00 EUR / year (~20% off)
 }
 
 # ==================== RESEND (Email) ====================
@@ -64,11 +66,16 @@ SMARTBILL_SERIES = "Meetings"
 SMARTBILL_BASE_URL = "https://ws.smartbill.ro/SBORO/api"
 
 EUR_TO_RON = 4.97
-PLAN_RON_PRICES = {
-    "pro": round(19 * EUR_TO_RON, 2),         # 94.43 RON
-    "enterprise": round(99 * EUR_TO_RON, 2),  # 491.03 RON
+# Per-billing-cycle price tables. Keys: "<tier>" = monthly, "<tier>_yearly" = annual.
+# Used by SmartBill invoice generation so yearly subscribers get correct annual amount.
+PLAN_EUR_PRICES = {
+    "pro":              19.0,
+    "pro_yearly":       182.0,
+    "enterprise":       99.0,
+    "enterprise_yearly": 950.0,
 }
-PLAN_EUR_PRICES = {"pro": 19.0, "enterprise": 99.0}
+PLAN_RON_PRICES = {k: round(v * EUR_TO_RON, 2) for k, v in PLAN_EUR_PRICES.items()}
+# pro: 94.43 / pro_yearly: 904.54 / enterprise: 491.03 / enterprise_yearly: 4721.50
 
 
 def _smartbill_auth_header() -> str:
@@ -82,8 +89,9 @@ async def create_smartbill_invoice(
     client_email: str,
     client_cui: Optional[str],
     client_address: Optional[str],
-    plan: str,  # "pro" or "enterprise"
-    issue_date: str,  # "YYYY-MM-DD"
+    plan: str,                  # "pro" or "enterprise"
+    issue_date: str,            # "YYYY-MM-DD"
+    interval: str = "monthly",  # "monthly" or "yearly"
 ) -> Optional[str]:
     """
     Create a SmartBill invoice and return the invoice series+number (e.g. "Meetings-001").
@@ -93,11 +101,13 @@ async def create_smartbill_invoice(
         print("[SmartBill] SMARTBILL_API_KEY not configured — skipping invoice creation")
         return None
 
-    plan_key = plan.lower()
-    unit_price_ron = PLAN_RON_PRICES.get(plan_key)
-    unit_price_eur = PLAN_EUR_PRICES.get(plan_key)
+    # Compose price-table key: "pro_yearly", "enterprise", etc.
+    base_plan = plan.lower().strip()
+    price_key = f"{base_plan}_yearly" if interval == "yearly" else base_plan
+    unit_price_ron = PLAN_RON_PRICES.get(price_key)
+    unit_price_eur = PLAN_EUR_PRICES.get(price_key)
     if unit_price_ron is None:
-        print(f"[SmartBill] Unknown plan '{plan}' — skipping")
+        print(f"[SmartBill] Unknown plan '{plan}' interval '{interval}' — skipping")
         return None
 
     # VAT 19% (Romania standard rate)
@@ -105,7 +115,8 @@ async def create_smartbill_invoice(
     vat_amount = round(unit_price_ron * vat_rate / 100, 2)
     total_ron = round(unit_price_ron + vat_amount, 2)
 
-    product_name = f"Abonament Meetings.ro {plan.capitalize()} (1 lună)"
+    period_label = "1 an" if interval == "yearly" else "1 lună"
+    product_name = f"Abonament Meetings.ro {base_plan.capitalize()} ({period_label})"
     invoice_payload = {
         "companyVatCode": SMARTBILL_CUI,
         "client": {
@@ -206,7 +217,12 @@ async def send_efactura_to_anaf(invoice_series: str, invoice_number: str) -> boo
         return False
 
 
-async def _create_and_save_invoice(user_email: str, plan: str, issue_date: str) -> None:
+async def _create_and_save_invoice(
+    user_email: str,
+    plan: str,
+    issue_date: str,
+    interval: str = "monthly",
+) -> None:
     """
     Full invoice flow: look up user billing info → create SmartBill invoice →
     optionally send e-Factura → save invoice record to MongoDB.
@@ -225,6 +241,7 @@ async def _create_and_save_invoice(user_email: str, plan: str, issue_date: str) 
             client_address=billing_address,
             plan=plan,
             issue_date=issue_date,
+            interval=interval,
         )
 
         if invoice_ref:
@@ -233,12 +250,15 @@ async def _create_and_save_invoice(user_email: str, plan: str, issue_date: str) 
             if len(parts) == 2:
                 await send_efactura_to_anaf(parts[0], parts[1])
 
-        # Persist invoice record regardless of SmartBill success
+        # Persist invoice record regardless of SmartBill success.
+        # Use the same price-key logic as create_smartbill_invoice.
+        price_key = f"{plan.lower()}_yearly" if interval == "yearly" else plan.lower()
         await db.invoices.insert_one({
             "user_email": user_email,
             "plan": plan,
-            "amount_ron": PLAN_RON_PRICES.get(plan.lower()),
-            "amount_eur": PLAN_EUR_PRICES.get(plan.lower()),
+            "interval": interval,
+            "amount_ron": PLAN_RON_PRICES.get(price_key),
+            "amount_eur": PLAN_EUR_PRICES.get(price_key),
             "invoice_ref": invoice_ref,
             "issue_date": issue_date,
             "created_at": datetime.now(timezone.utc),
@@ -4205,16 +4225,22 @@ async def stripe_webhook(request: Request):
             subscription_id = session.get("subscription")
             mode = session.get("mode")
             plan_tier = "PRO"
+            interval = "monthly"  # default
 
             print(f"[Stripe:{WEBHOOK_VERSION}] checkout.session.completed mode={mode} email={user_email} sub={subscription_id}")
 
-            # Resolve plan tier from subscription (best-effort)
+            # Resolve plan tier + interval from subscription (best-effort)
             if subscription_id:
                 try:
                     sub = stripe.Subscription.retrieve(subscription_id)
                     price_id = sub["items"]["data"][0]["price"]["id"]
+                    # Tier
                     if price_id in [STRIPE_PRICES.get("enterprise_monthly"), STRIPE_PRICES.get("enterprise_yearly")]:
                         plan_tier = "ENTERPRISE"
+                    # Interval — yearly Stripe prices map to yearly invoice
+                    if price_id in [STRIPE_PRICES.get("pro_yearly"), STRIPE_PRICES.get("enterprise_yearly")]:
+                        interval = "yearly"
+                    print(f"[Stripe:{WEBHOOK_VERSION}] Resolved tier={plan_tier} interval={interval} from price={price_id}")
                 except Exception as exc:
                     print(f"[Stripe:{WEBHOOK_VERSION}] WARN retrieve subscription {subscription_id} failed: {type(exc).__name__}: {exc}")
 
@@ -4248,6 +4274,7 @@ async def stripe_webhook(request: Request):
                     user_email=user_email,
                     plan=plan_tier,
                     issue_date=issue_date,
+                    interval=interval,
                 ))
             except Exception as exc:
                 print(f"[Stripe:{WEBHOOK_VERSION}] SmartBill task scheduling failed: {type(exc).__name__}: {exc}")
