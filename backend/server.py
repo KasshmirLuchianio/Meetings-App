@@ -4328,12 +4328,143 @@ async def stripe_webhook(request: Request):
                         {"$set": {
                             "plan": "FREE",
                             "stripe_subscription_id": None,
+                            "subscription_status": "canceled",
                             "plan_updated_at": datetime.now(timezone.utc),
                         }}
                     )
                     print(f"[Stripe:{WEBHOOK_VERSION}] Customer {customer_id} downgraded to FREE")
                 except Exception as exc:
                     print(f"[Stripe:{WEBHOOK_VERSION}] Downgrade failed for {customer_id}: {type(exc).__name__}: {exc}")
+
+        elif event_type == "customer.subscription.updated":
+            # Fires on: plan change, cancellation scheduled, billing cycle change, trial end, etc.
+            sub = (event.get("data") or {}).get("object") or {}
+            customer_id = sub.get("customer")
+            sub_id = sub.get("id")
+            sub_status = sub.get("status")  # active / past_due / canceled / unpaid / trialing / incomplete
+            cancel_at_period_end = sub.get("cancel_at_period_end", False)
+            current_period_end = sub.get("current_period_end")  # unix ts
+
+            print(f"[Stripe:{WEBHOOK_VERSION}] subscription.updated cust={customer_id} sub={sub_id} status={sub_status} cancel_at_end={cancel_at_period_end}")
+
+            if customer_id:
+                try:
+                    update_fields = {
+                        "subscription_status": sub_status,
+                        "subscription_cancel_at_period_end": bool(cancel_at_period_end),
+                        "plan_updated_at": datetime.now(timezone.utc),
+                    }
+                    if current_period_end:
+                        update_fields["subscription_current_period_end"] = datetime.fromtimestamp(
+                            current_period_end, tz=timezone.utc,
+                        )
+                    # If past_due / unpaid / canceled-immediately -> downgrade to FREE
+                    if sub_status in ("canceled", "unpaid", "incomplete_expired"):
+                        update_fields["plan"] = "FREE"
+                        update_fields["stripe_subscription_id"] = None
+                    await users_col.update_one(
+                        {"stripe_customer_id": customer_id},
+                        {"$set": update_fields},
+                    )
+                    print(f"[Stripe:{WEBHOOK_VERSION}] Synced subscription state for cust={customer_id}: {update_fields}")
+                except Exception as exc:
+                    print(f"[Stripe:{WEBHOOK_VERSION}] subscription.updated DB sync failed: {type(exc).__name__}: {exc}")
+
+        elif event_type == "invoice.payment_failed":
+            # Card expired / declined / insufficient funds. Mark user as past_due.
+            invoice = (event.get("data") or {}).get("object") or {}
+            customer_id = invoice.get("customer")
+            sub_id = invoice.get("subscription")
+            attempt_count = invoice.get("attempt_count", 1)
+            next_attempt = invoice.get("next_payment_attempt")  # unix ts or None
+
+            print(f"[Stripe:{WEBHOOK_VERSION}] invoice.payment_failed cust={customer_id} sub={sub_id} attempt={attempt_count} next={next_attempt}")
+
+            if customer_id:
+                try:
+                    update_fields = {
+                        "subscription_status": "past_due",
+                        "payment_failed_at": datetime.now(timezone.utc),
+                        "payment_failed_attempt_count": int(attempt_count),
+                    }
+                    if next_attempt:
+                        update_fields["payment_next_attempt_at"] = datetime.fromtimestamp(
+                            next_attempt, tz=timezone.utc,
+                        )
+                    await users_col.update_one(
+                        {"stripe_customer_id": customer_id},
+                        {"$set": update_fields},
+                    )
+                    print(f"[Stripe:{WEBHOOK_VERSION}] Marked cust={customer_id} as past_due")
+                    # NOTE: do NOT downgrade to FREE yet — Stripe retries 3x over ~3 weeks.
+                    # Final downgrade happens via subscription.updated -> status='canceled'.
+                except Exception as exc:
+                    print(f"[Stripe:{WEBHOOK_VERSION}] payment_failed DB update failed: {type(exc).__name__}: {exc}")
+
+        elif event_type == "invoice.payment_succeeded":
+            # Fires on EVERY successful charge — including monthly/yearly RENEWALS.
+            # First-payment is also covered by checkout.session.completed (we dedupe via SmartBill ref).
+            # Renewals (month 2, 3, ...) only fire here -> we MUST issue a new SmartBill invoice each time.
+            invoice = (event.get("data") or {}).get("object") or {}
+            customer_id = invoice.get("customer")
+            sub_id = invoice.get("subscription")
+            billing_reason = invoice.get("billing_reason")  # "subscription_create" / "subscription_cycle" / "manual"
+            amount_paid = invoice.get("amount_paid", 0) / 100.0  # cents -> EUR
+
+            print(f"[Stripe:{WEBHOOK_VERSION}] invoice.payment_succeeded cust={customer_id} sub={sub_id} reason={billing_reason} amount={amount_paid}")
+
+            # Skip first-payment — already handled by checkout.session.completed (avoids double SmartBill invoice)
+            if billing_reason == "subscription_create":
+                print(f"[Stripe:{WEBHOOK_VERSION}] Skipping first-payment invoice ({billing_reason}) — handled by checkout.session.completed")
+                return {"status": "ok", "note": "first_payment_handled_elsewhere"}
+
+            # Renewal — issue new SmartBill invoice
+            if customer_id and billing_reason in ("subscription_cycle", "subscription_update", "manual"):
+                # Resolve user from customer_id
+                user_doc = await users_col.find_one({"stripe_customer_id": customer_id})
+                if not user_doc:
+                    print(f"[Stripe:{WEBHOOK_VERSION}] No user with stripe_customer_id={customer_id} — cannot invoice")
+                    return {"status": "ok", "note": "user_not_found"}
+
+                # Resolve plan + interval from subscription
+                renewal_plan = "PRO"
+                renewal_interval = "monthly"
+                if sub_id:
+                    try:
+                        sub = stripe.Subscription.retrieve(sub_id)
+                        price_id = sub["items"]["data"][0]["price"]["id"]
+                        if price_id in [STRIPE_PRICES.get("enterprise_monthly"), STRIPE_PRICES.get("enterprise_yearly")]:
+                            renewal_plan = "ENTERPRISE"
+                        if price_id in [STRIPE_PRICES.get("pro_yearly"), STRIPE_PRICES.get("enterprise_yearly")]:
+                            renewal_interval = "yearly"
+                    except Exception as exc:
+                        print(f"[Stripe:{WEBHOOK_VERSION}] WARN retrieve subscription for renewal {sub_id}: {type(exc).__name__}: {exc}")
+
+                # Update last-paid timestamp on user (clears past_due if any)
+                try:
+                    await users_col.update_one(
+                        {"_id": user_doc["_id"]},
+                        {"$set": {
+                            "subscription_status": "active",
+                            "last_payment_at": datetime.now(timezone.utc),
+                        },
+                         "$unset": {"payment_failed_at": "", "payment_failed_attempt_count": ""}},
+                    )
+                except Exception as exc:
+                    print(f"[Stripe:{WEBHOOK_VERSION}] Renewal user update failed: {type(exc).__name__}: {exc}")
+
+                # Generate SmartBill invoice for renewal
+                try:
+                    issue_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                    asyncio.create_task(_create_and_save_invoice(
+                        user_email=user_doc.get("email"),
+                        plan=renewal_plan,
+                        issue_date=issue_date,
+                        interval=renewal_interval,
+                    ))
+                    print(f"[Stripe:{WEBHOOK_VERSION}] Renewal invoice scheduled for {user_doc.get('email')} ({renewal_plan} {renewal_interval})")
+                except Exception as exc:
+                    print(f"[Stripe:{WEBHOOK_VERSION}] Renewal invoice scheduling failed: {type(exc).__name__}: {exc}")
 
         else:
             print(f"[Stripe:{WEBHOOK_VERSION}] Ignoring event type: {event_type}")
