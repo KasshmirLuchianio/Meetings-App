@@ -29,6 +29,9 @@ import stripe
 import jwt
 import bcrypt
 import resend
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.starlette import StarletteIntegration
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -36,6 +39,24 @@ from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 
 load_dotenv()
+
+# ==================== SENTRY (Observability) ====================
+# Captures uncaught exceptions, slow requests, and webhook errors with full context.
+# Configured via SENTRY_DSN env var. If unset, Sentry SDK becomes a no-op.
+_SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
+if _SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=_SENTRY_DSN,
+        integrations=[FastApiIntegration(), StarletteIntegration()],
+        traces_sample_rate=0.1,           # 10% of requests sampled for performance
+        profiles_sample_rate=0.0,         # disable profiling (extra cost)
+        environment=os.environ.get("RENDER_SERVICE_NAME", "unknown"),
+        release=os.environ.get("RENDER_GIT_COMMIT", "dev"),
+        send_default_pii=False,           # GDPR — never auto-attach user emails
+    )
+    print(f"[Sentry] Initialized with environment={os.environ.get('RENDER_SERVICE_NAME', 'unknown')}")
+else:
+    print("[Sentry] SENTRY_DSN not configured — observability disabled")
 
 # ==================== CONFIG ====================
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017/gal_meetings")
@@ -336,6 +357,18 @@ async def _create_and_save_invoice(
     except Exception as exc:
         # Catastrophic failure — persist to invoice_failures so admin can retry
         print(f"[SmartBill] _create_and_save_invoice CRITICAL error for {user_email} at phase={error_phase}: {type(exc).__name__}: {exc}")
+        # Sentry alert — admin gets paged for invoice generation failures
+        sentry_sdk.set_tag("component", "smartbill_invoice")
+        sentry_sdk.set_tag("phase", error_phase)
+        sentry_sdk.set_tag("plan", plan)
+        sentry_sdk.set_tag("interval", interval)
+        sentry_sdk.set_context("invoice_failure", {
+            "user_email": user_email,
+            "stripe_event_id": stripe_event_id,
+            "stripe_session_id": stripe_session_id,
+            "invoice_ref": invoice_ref,
+        })
+        sentry_sdk.capture_exception(exc)
         try:
             await invoice_failures_col.insert_one({
                 "user_email":         user_email,
@@ -354,8 +387,12 @@ async def _create_and_save_invoice(
                 "created_at":         datetime.now(timezone.utc),
             })
         except Exception as persist_exc:
-            # If we can't even persist the failure, log loudly — Sentry will catch this
+            # If we can't even persist the failure, log loudly + page admin
             print(f"[SmartBill] FATAL: could not persist failure to MongoDB: {persist_exc}")
+            sentry_sdk.capture_message(
+                f"FATAL: invoice_failures persist failed for {user_email}: {persist_exc}",
+                level="fatal",
+            )
 
 # CORS Origins - includes Expo development
 CORS_ALLOWED_ORIGINS = [
@@ -4389,6 +4426,9 @@ async def stripe_webhook(request: Request):
     except Exception as exc:
         print(f"[Stripe:{WEBHOOK_VERSION}] construct_event UNHANDLED {type(exc).__name__}: {exc}")
         print(f"[Stripe:{WEBHOOK_VERSION}] Traceback:\n{traceback.format_exc()}")
+        sentry_sdk.set_tag("component", "stripe_webhook")
+        sentry_sdk.set_tag("phase", "construct_event")
+        sentry_sdk.capture_exception(exc)
         return JSONResponse(status_code=500, content={"detail": f"construct_event: {type(exc).__name__}: {exc}"})
 
     # ---- 2. Event processing — EVERYTHING inside one try/except ----
@@ -4644,6 +4684,11 @@ async def stripe_webhook(request: Request):
         # Last-resort catch — should be unreachable now since each operation is wrapped
         print(f"[Stripe:{WEBHOOK_VERSION}] OUTER CATCH event {event_id} {type(exc).__name__}: {exc}")
         print(f"[Stripe:{WEBHOOK_VERSION}] Traceback:\n{traceback.format_exc()}")
+        sentry_sdk.set_tag("component", "stripe_webhook")
+        sentry_sdk.set_tag("phase", "event_processing")
+        sentry_sdk.set_tag("stripe_event_type", event_type)
+        sentry_sdk.set_context("stripe_event", {"id": event_id, "type": event_type})
+        sentry_sdk.capture_exception(exc)
         # Return 200 so Stripe stops retrying — error is logged and recoverable manually
         return {"status": "ok", "note": f"caught {type(exc).__name__}"}
 
