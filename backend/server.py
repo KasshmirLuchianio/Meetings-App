@@ -235,18 +235,31 @@ async def _create_and_save_invoice(
     plan: str,
     issue_date: str,
     interval: str = "monthly",
+    stripe_event_id: Optional[str] = None,
+    stripe_session_id: Optional[str] = None,
 ) -> None:
     """
     Full invoice flow: look up user billing info → create SmartBill invoice →
     optionally send e-Factura → save invoice record to MongoDB.
-    Designed to be called as asyncio.create_task() so it never blocks Stripe webhook response.
+
+    NEVER raises — designed to be called as asyncio.create_task() so it never blocks
+    the Stripe webhook response. Failures are persisted to invoice_failures
+    collection so they can be retried via /api/admin/invoices/retry-failures.
     """
+    price_key = f"{plan.lower()}_yearly" if interval == "yearly" else plan.lower()
+    error_phase = "init"
+    invoice_ref: Optional[str] = None
+
     try:
+        # ---- 1. Resolve billing info ----
+        error_phase = "user_lookup"
         user = await db.users.find_one({"email": user_email})
         billing_name = (user or {}).get("billing_name", "") or user_email
         billing_cui = (user or {}).get("billing_cui", "")
         billing_address = (user or {}).get("billing_address", "")
 
+        # ---- 2. Create SmartBill invoice ----
+        error_phase = "smartbill_create"
         invoice_ref = await create_smartbill_invoice(
             client_name=billing_name,
             client_email=user_email,
@@ -257,27 +270,92 @@ async def _create_and_save_invoice(
             interval=interval,
         )
 
+        # ---- 3. Send to ANAF e-Factura (best-effort) ----
         if invoice_ref:
-            # Optionally push to ANAF e-Factura (best-effort)
-            parts = invoice_ref.split("-", 1)
-            if len(parts) == 2:
-                await send_efactura_to_anaf(parts[0], parts[1])
+            error_phase = "anaf_efactura"
+            try:
+                parts = invoice_ref.split("-", 1)
+                if len(parts) == 2:
+                    await send_efactura_to_anaf(parts[0], parts[1])
+            except Exception as anaf_exc:
+                # ANAF failure is recoverable — invoice exists in SmartBill,
+                # can be re-submitted manually from SmartBill UI
+                print(f"[SmartBill] ANAF submission failed for {invoice_ref}: {anaf_exc}")
+                await invoice_failures_col.insert_one({
+                    "user_email":         user_email,
+                    "plan":               plan,
+                    "interval":           interval,
+                    "stripe_event_id":    stripe_event_id,
+                    "stripe_session_id":  stripe_session_id,
+                    "invoice_ref":        invoice_ref,
+                    "phase":              "anaf_efactura",
+                    "error":              str(anaf_exc),
+                    "error_type":         type(anaf_exc).__name__,
+                    "retry_count":        0,
+                    "needs_manual_review": True,
+                    "resolved":           False,
+                    "issue_date":         issue_date,
+                    "created_at":         datetime.now(timezone.utc),
+                })
 
-        # Persist invoice record regardless of SmartBill success.
-        # Use the same price-key logic as create_smartbill_invoice.
-        price_key = f"{plan.lower()}_yearly" if interval == "yearly" else plan.lower()
-        await db.invoices.insert_one({
-            "user_email": user_email,
-            "plan": plan,
-            "interval": interval,
-            "amount_ron": PLAN_RON_PRICES.get(price_key),
-            "amount_eur": PLAN_EUR_PRICES.get(price_key),
-            "invoice_ref": invoice_ref,
-            "issue_date": issue_date,
-            "created_at": datetime.now(timezone.utc),
+        # ---- 4. Persist invoice record ----
+        error_phase = "mongo_invoice_persist"
+        await invoices_col.insert_one({
+            "user_email":        user_email,
+            "plan":              plan,
+            "interval":          interval,
+            "amount_ron":        PLAN_RON_PRICES.get(price_key),
+            "amount_eur":        PLAN_EUR_PRICES.get(price_key),
+            "invoice_ref":       invoice_ref,
+            "issue_date":        issue_date,
+            "stripe_event_id":   stripe_event_id,
+            "stripe_session_id": stripe_session_id,
+            "created_at":        datetime.now(timezone.utc),
         })
+
+        # If invoice_ref is None, SmartBill skipped (no API key) or failed silently — flag it
+        if not invoice_ref:
+            await invoice_failures_col.insert_one({
+                "user_email":         user_email,
+                "plan":               plan,
+                "interval":           interval,
+                "stripe_event_id":    stripe_event_id,
+                "stripe_session_id":  stripe_session_id,
+                "invoice_ref":        None,
+                "phase":              "smartbill_create",
+                "error":              "create_smartbill_invoice returned None (likely API key missing or HTTP error)",
+                "error_type":         "SmartBillReturnedNone",
+                "retry_count":        0,
+                "needs_manual_review": True,
+                "resolved":           False,
+                "issue_date":         issue_date,
+                "created_at":         datetime.now(timezone.utc),
+            })
+            print(f"[SmartBill] Persisted failure for {user_email} (no invoice_ref returned)")
+
     except Exception as exc:
-        print(f"[SmartBill] _create_and_save_invoice error for {user_email}: {exc}")
+        # Catastrophic failure — persist to invoice_failures so admin can retry
+        print(f"[SmartBill] _create_and_save_invoice CRITICAL error for {user_email} at phase={error_phase}: {type(exc).__name__}: {exc}")
+        try:
+            await invoice_failures_col.insert_one({
+                "user_email":         user_email,
+                "plan":               plan,
+                "interval":           interval,
+                "stripe_event_id":    stripe_event_id,
+                "stripe_session_id":  stripe_session_id,
+                "invoice_ref":        invoice_ref,
+                "phase":              error_phase,
+                "error":              str(exc),
+                "error_type":         type(exc).__name__,
+                "retry_count":        0,
+                "needs_manual_review": True,
+                "resolved":           False,
+                "issue_date":         issue_date,
+                "created_at":         datetime.now(timezone.utc),
+            })
+        except Exception as persist_exc:
+            # If we can't even persist the failure, log loudly — Sentry will catch this
+            print(f"[SmartBill] FATAL: could not persist failure to MongoDB: {persist_exc}")
 
 # CORS Origins - includes Expo development
 CORS_ALLOWED_ORIGINS = [
@@ -878,6 +956,93 @@ async def admin_delete_all_users(admin: dict = Depends(require_admin)):
     """Delete ALL users. Requires admin role."""
     result = await users_col.delete_many({})
     return {"message": f"All users deleted", "deleted": result.deleted_count}
+
+
+# ==================== ADMIN — INVOICE FAILURES ====================
+
+@app.get("/api/admin/invoice-failures")
+async def admin_list_invoice_failures(
+    only_unresolved: bool = Query(True, description="Show only unresolved failures"),
+    limit: int = Query(100, ge=1, le=1000),
+    admin: dict = Depends(require_admin),
+):
+    """List invoice generation failures (SmartBill / ANAF / DB issues) for manual review."""
+    query = {"resolved": False} if only_unresolved else {}
+    cursor = invoice_failures_col.find(query).sort("created_at", -1).limit(limit)
+    docs = []
+    async for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        if "created_at" in doc and isinstance(doc["created_at"], datetime):
+            doc["created_at"] = doc["created_at"].isoformat()
+        if "last_retry_at" in doc and isinstance(doc.get("last_retry_at"), datetime):
+            doc["last_retry_at"] = doc["last_retry_at"].isoformat()
+        docs.append(doc)
+    return {
+        "count":   len(docs),
+        "filter":  "unresolved" if only_unresolved else "all",
+        "items":   docs,
+    }
+
+
+@app.post("/api/admin/invoice-failures/{failure_id}/retry")
+async def admin_retry_invoice_failure(
+    failure_id: str,
+    admin: dict = Depends(require_admin),
+):
+    """Manually retry an invoice that previously failed. Re-runs the full SmartBill+ANAF flow."""
+    try:
+        failure = await invoice_failures_col.find_one({"_id": ObjectId(failure_id)})
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid failure_id")
+    if not failure:
+        raise HTTPException(status_code=404, detail="Failure not found")
+    if failure.get("resolved"):
+        return {"message": "Already resolved", "failure_id": failure_id}
+
+    # Bump retry counter
+    await invoice_failures_col.update_one(
+        {"_id": failure["_id"]},
+        {"$inc": {"retry_count": 1},
+         "$set": {"last_retry_at": datetime.now(timezone.utc)}},
+    )
+
+    # Re-trigger the full flow (this may itself create a new failure record if it fails again)
+    try:
+        await _create_and_save_invoice(
+            user_email=failure["user_email"],
+            plan=failure["plan"],
+            issue_date=failure.get("issue_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            interval=failure.get("interval", "monthly"),
+            stripe_event_id=failure.get("stripe_event_id"),
+            stripe_session_id=failure.get("stripe_session_id"),
+        )
+        # Mark original as resolved if no new failure was created in the meantime
+        # (best-effort — admin can manually re-resolve if needed)
+        await invoice_failures_col.update_one(
+            {"_id": failure["_id"]},
+            {"$set": {"resolved": True, "resolved_at": datetime.now(timezone.utc)}},
+        )
+        return {"message": "Retry attempted", "failure_id": failure_id, "resolved": True}
+    except Exception as exc:
+        return {"message": f"Retry threw: {type(exc).__name__}: {exc}", "failure_id": failure_id, "resolved": False}
+
+
+@app.post("/api/admin/invoice-failures/{failure_id}/resolve")
+async def admin_resolve_invoice_failure(
+    failure_id: str,
+    admin: dict = Depends(require_admin),
+):
+    """Manually mark a failure as resolved (after fixing in SmartBill UI directly)."""
+    try:
+        result = await invoice_failures_col.update_one(
+            {"_id": ObjectId(failure_id)},
+            {"$set": {"resolved": True, "resolved_at": datetime.now(timezone.utc), "needs_manual_review": False}},
+        )
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid failure_id")
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Failure not found")
+    return {"message": "Marked resolved", "failure_id": failure_id}
 
 
 # ⚠️ TEMPORARY — remove after testing.
@@ -4314,6 +4479,8 @@ async def stripe_webhook(request: Request):
                     plan=plan_tier,
                     issue_date=issue_date,
                     interval=interval,
+                    stripe_event_id=event_id,
+                    stripe_session_id=session.get("id"),
                 ))
             except Exception as exc:
                 print(f"[Stripe:{WEBHOOK_VERSION}] SmartBill task scheduling failed: {type(exc).__name__}: {exc}")
@@ -4461,6 +4628,8 @@ async def stripe_webhook(request: Request):
                         plan=renewal_plan,
                         issue_date=issue_date,
                         interval=renewal_interval,
+                        stripe_event_id=event_id,
+                        stripe_session_id=invoice.get("id"),  # invoice id, not session for renewals
                     ))
                     print(f"[Stripe:{WEBHOOK_VERSION}] Renewal invoice scheduled for {user_doc.get('email')} ({renewal_plan} {renewal_interval})")
                 except Exception as exc:
