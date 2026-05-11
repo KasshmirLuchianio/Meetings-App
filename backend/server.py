@@ -820,6 +820,57 @@ async def create_demo_account():
         print("[DEMO] Demo account created: demo@meetings.ro / Demo2026!")
 
 
+async def create_google_review_account():
+    """
+    Provision a permanent review account used by Google Play recenzent in App Access.
+    Idempotent: only creates if missing; if present, ensures critical fields are correct.
+    """
+    review_email = "google-review@meetings-ro.app"
+    review_password = "GoogleReview2026!"
+    now = datetime.now(timezone.utc)
+
+    existing = await users_col.find_one({"email": review_email})
+    if not existing:
+        await users_col.insert_one({
+            "email":                       review_email,
+            "password_hash":               hash_password(review_password),
+            "name":                        "Google Review",
+            "company":                     "Google Play Review",
+            "billing_name":                "Google Play Review",
+            "billing_cui":                 "",
+            "billing_address":             "",
+            "plan":                        "PRO",
+            "role":                        "member",
+            "tenant_id":                   None,
+            "email_verified":              True,
+            "is_verified":                 True,   # legacy field for old code paths
+            "subscription_status":         "active",
+            "minutes_used_this_month":     0.0,
+            "minutes_limit_this_month":    300,
+            "last_monthly_reset":          now,
+            "keep_audio":                  False,
+            "plan_updated_at":             now,
+            "created_at":                  now,
+        })
+        print(f"[GOOGLE] Review account created: {review_email} / {review_password} (plan=PRO, verified=True)")
+    else:
+        # Ensure account stays usable across deploys — refresh critical fields
+        await users_col.update_one(
+            {"email": review_email},
+            {"$set": {
+                "password_hash":            hash_password(review_password),
+                "plan":                     "PRO",
+                "email_verified":           True,
+                "is_verified":              True,
+                "subscription_status":      "active",
+                "minutes_used_this_month":  0.0,
+                "minutes_limit_this_month": 300,
+                "last_monthly_reset":       now,
+            }},
+        )
+        print(f"[GOOGLE] Review account refreshed: {review_email} (plan=PRO, minutes reset)")
+
+
 @app.on_event("startup")
 async def startup():
     await ensure_indexes()
@@ -846,6 +897,7 @@ async def startup():
     await invoice_failures_col.create_index("needs_manual_review")
     await seed_default_localities()
     await create_demo_account()
+    await create_google_review_account()
     # Background: reset minute quotas on the 1st of each month at 00:00 UTC
     asyncio.create_task(monthly_usage_reset_job())
     print("[Meetings.ro] Server started. Indexes ensured.")
