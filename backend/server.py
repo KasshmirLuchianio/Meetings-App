@@ -4447,6 +4447,7 @@ async def create_checkout_session(req: CheckoutRequest, user: dict = Depends(get
             mode="subscription",
             customer_email=req.user_email,
             line_items=[{"price": price_id, "quantity": 1}],
+            allow_promotion_codes=True,  # enable "Add promotion code" field on Stripe Checkout
             success_url="https://meetings-ro-api.onrender.com/payment-success?session_id={CHECKOUT_SESSION_ID}",
             cancel_url="https://meetings-ro-api.onrender.com/payment-cancel",
         )
