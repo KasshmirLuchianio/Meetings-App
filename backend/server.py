@@ -803,10 +803,10 @@ async def monthly_usage_reset_job():
 
 
 async def create_demo_account():
-    """Create a demo account for Apple Review if it doesn't exist."""
+    """Create a demo account for Apple Review (idempotent, race-safe for multi-worker startup)."""
     demo_email = "demo@meetings.ro"
-    existing = await users_col.find_one({"email": demo_email})
-    if not existing:
+    now = datetime.now(timezone.utc)
+    try:
         await users_col.insert_one({
             "email": demo_email,
             "password_hash": hash_password("Demo2026!"),
@@ -814,23 +814,26 @@ async def create_demo_account():
             "plan": "PRO",
             "email_verified": True,
             "minutes_used_this_month": 0.0,
-            "last_monthly_reset": datetime.now(timezone.utc),
-            "created_at": datetime.now(timezone.utc),
+            "last_monthly_reset": now,
+            "created_at": now,
         })
         print("[DEMO] Demo account created: demo@meetings.ro / Demo2026!")
+    except DuplicateKeyError:
+        # Another worker created it in parallel — that's fine
+        pass
 
 
 async def create_google_review_account():
     """
     Provision a permanent review account used by Google Play recenzent in App Access.
-    Idempotent: only creates if missing; if present, ensures critical fields are correct.
+    Race-safe: uses insert + DuplicateKeyError handler, then refreshes critical fields.
+    Runs once per worker on startup; multi-worker safe.
     """
     review_email = "google-review@meetings-ro.app"
     review_password = "GoogleReview2026!"
     now = datetime.now(timezone.utc)
 
-    existing = await users_col.find_one({"email": review_email})
-    if not existing:
+    try:
         await users_col.insert_one({
             "email":                       review_email,
             "password_hash":               hash_password(review_password),
@@ -853,8 +856,14 @@ async def create_google_review_account():
             "created_at":                  now,
         })
         print(f"[GOOGLE] Review account created: {review_email} / {review_password} (plan=PRO, verified=True)")
-    else:
-        # Ensure account stays usable across deploys — refresh critical fields
+        return
+    except DuplicateKeyError:
+        # Account already exists — refresh critical fields below
+        pass
+
+    # Always-refresh: ensures the account stays usable across deploys / DB state changes
+    # (works for both 'existed already' AND 'created by another worker' paths)
+    try:
         await users_col.update_one(
             {"email": review_email},
             {"$set": {
@@ -869,6 +878,8 @@ async def create_google_review_account():
             }},
         )
         print(f"[GOOGLE] Review account refreshed: {review_email} (plan=PRO, minutes reset)")
+    except Exception as exc:
+        print(f"[GOOGLE] WARN refresh failed for {review_email}: {type(exc).__name__}: {exc}")
 
 
 @app.on_event("startup")
