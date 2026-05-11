@@ -3998,71 +3998,186 @@ async def delete_locality(locality_name: str, user: dict = Depends(get_current_u
 
 # ---- EXPORT ----
 
+def _format_date_ro(value) -> str:
+    """Format a date string/datetime in Europe/Bucharest as 'DD.MM.YYYY HH:MM'."""
+    if not value:
+        return "—"
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("Europe/Bucharest")
+    except Exception:
+        tz = None
+    try:
+        if isinstance(value, str):
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        elif isinstance(value, datetime):
+            dt = value
+        else:
+            return str(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        if tz is not None:
+            dt = dt.astimezone(tz)
+        return dt.strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return str(value)
+
+
+def _coerce_action_item(item) -> dict:
+    """Normalize action item (string OR dict OR JSON-string) into {text, owner, deadline}."""
+    if isinstance(item, dict):
+        return {
+            "text":     str(item.get("text") or item.get("actiune") or item.get("descriere") or ""),
+            "owner":    str(item.get("owner") or item.get("responsabil") or "-") or "-",
+            "deadline": str(item.get("deadline") or item.get("termen") or "-") or "-",
+        }
+    if isinstance(item, str):
+        s = item.strip()
+        # Maybe it's a stringified JSON
+        if s.startswith("{") and s.endswith("}"):
+            try:
+                return _coerce_action_item(json.loads(s))
+            except Exception:
+                pass
+        return {"text": s, "owner": "-", "deadline": "-"}
+    return {"text": str(item), "owner": "-", "deadline": "-"}
+
+
+def _get_meeting_section(meeting: dict, *keys, default=None):
+    """Lookup a value in meeting top-level OR in meeting.vertical_config — supports multiple key aliases."""
+    vc = meeting.get("vertical_config") or {}
+    for k in keys:
+        if k in meeting and meeting[k] not in (None, "", []):
+            return meeting[k]
+        if k in vc and vc[k] not in (None, "", []):
+            return vc[k]
+    return default
+
+
 @app.get("/api/meetings/{meeting_id}/export/pdf")
 async def export_pdf(meeting_id: str, user: dict = Depends(get_current_user)):
-    """Export meeting as PDF."""
+    """Export meeting as PDF — full content from vertical_config + transcript."""
     meeting = await verify_meeting_ownership(meeting_id, user)
-    
+
     from fpdf import FPDF
-    
+
     pdf = FPDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.set_left_margin(15)
     pdf.set_right_margin(15)
-    
-    # Use built-in font that supports basic characters
-    pdf.set_font("Arial", "B", 16)
+
+    def H1(text):
+        pdf.set_font("Arial", "B", 16)
+        pdf.multi_cell(0, 10, transliterate_ro(str(text)))
+
+    def H2(text):
+        pdf.ln(2)
+        pdf.set_font("Arial", "B", 12)
+        pdf.multi_cell(0, 8, transliterate_ro(str(text)))
+
+    def P(text, bold_label: str = None):
+        pdf.set_font("Arial", "", 10)
+        if bold_label:
+            pdf.set_font("Arial", "B", 10)
+            pdf.write(6, transliterate_ro(bold_label))
+            pdf.set_font("Arial", "", 10)
+        pdf.multi_cell(0, 6, transliterate_ro(str(text)))
+
+    def Bullet(text):
+        pdf.set_font("Arial", "", 10)
+        pdf.multi_cell(0, 6, "- " + transliterate_ro(str(text)))
+
+    # ---- Header ----
     title = meeting.get("title", "Sedinta") or "Sedinta"
-    # Transliterate Romanian chars for PDF compatibility
-    title_safe = transliterate_ro(title)
-    pdf.cell(0, 10, title_safe, new_x="LMARGIN", new_y="NEXT")
-    
-    pdf.set_font("Arial", "", 10)
-    locality = meeting.get("locality", "Necunoscut") or "Necunoscut"
-    date_str = meeting.get("date", "")
-    if date_str:
-        try:
-            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-            date_str = dt.strftime("%d.%m.%Y %H:%M")
-        except (ValueError, AttributeError):
-            pass
-    
-    pdf.cell(0, 6, f"Localitate: {transliterate_ro(locality)}", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"Data: {date_str}", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(5)
-    
-    # Summary
-    summary = meeting.get("summary", [])
-    if summary:
-        pdf.set_font("Arial", "B", 12)
-        pdf.cell(0, 8, "Rezumat", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("Arial", "", 9)
-        for i, item in enumerate(summary[:5]):  # Limit to 5 items
-            text = transliterate_ro(item)[:100]  # Limit length
-            pdf.cell(0, 5, f"{i+1}. {text}", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(3)
-    
-    # Actions
-    actions = meeting.get("actions", [])
+    H1(title)
+
+    locality = _get_meeting_section(meeting, "loc_desfasurare", "locality", default="Necunoscut")
+    date_value = _get_meeting_section(meeting, "data_desfasurare", "date") or meeting.get("created_at")
+    P(str(locality), bold_label="Localitate: ")
+    P(_format_date_ro(date_value), bold_label="Data: ")
+
+    # ---- Participanti ----
+    participants = _get_meeting_section(meeting, "participanti", "participants")
+    if participants:
+        H2("Participanti")
+        if isinstance(participants, list):
+            for p in participants:
+                Bullet(p)
+        else:
+            P(str(participants))
+
+    # ---- Subiecte / Ordinea de zi ----
+    agenda = _get_meeting_section(meeting, "ordine_de_zi", "subiecte_discutate", "agenda")
+    if agenda:
+        H2("Subiecte discutate")
+        if isinstance(agenda, list):
+            for i, item in enumerate(agenda, 1):
+                P(f"{i}. {item}")
+        else:
+            P(str(agenda))
+
+    # ---- Decizii ----
+    decisions = _get_meeting_section(meeting, "decizii", "hotarari", "decizii_luate")
+    if decisions:
+        H2("Decizii")
+        if isinstance(decisions, list):
+            for d in decisions:
+                Bullet(d)
+        else:
+            P(str(decisions))
+
+    # ---- Actiuni ----
+    actions = _get_meeting_section(meeting, "actiuni_de_urmat", "actions")
     if actions:
-        pdf.set_font("Arial", "B", 12)
-        pdf.cell(0, 8, "Actiuni", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("Arial", "", 9)
-        for i, action in enumerate(actions[:5]):  # Limit to 5 actions
-            status = "[X]" if action.get("completed") else "[ ]"
-            text = transliterate_ro(action.get("text", ""))[:80]
-            pdf.cell(0, 5, f"{status} {text}", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(3)
-    
-    # Output
+        H2("Actiuni de urmat")
+        if isinstance(actions, list):
+            for a in actions:
+                norm = _coerce_action_item(a)
+                line = f"- {norm['text']}"
+                if norm["owner"] != "-":
+                    line += f"  (Responsabil: {norm['owner']})"
+                if norm["deadline"] != "-":
+                    line += f"  [Termen: {norm['deadline']}]"
+                pdf.set_font("Arial", "", 10)
+                pdf.multi_cell(0, 6, transliterate_ro(line))
+        else:
+            P(str(actions))
+
+    # ---- Concluzii ----
+    concluzii = _get_meeting_section(meeting, "concluzii", "concluzia")
+    if concluzii:
+        H2("Concluzii")
+        if isinstance(concluzii, list):
+            for c in concluzii:
+                Bullet(c)
+        else:
+            P(str(concluzii))
+
+    # ---- Observatii ----
+    observatii = _get_meeting_section(meeting, "observatii", "observations")
+    if observatii:
+        H2("Observatii")
+        if isinstance(observatii, list):
+            for o in observatii:
+                Bullet(o)
+        else:
+            P(str(observatii))
+
+    # ---- Transcriere ----
+    transcript = meeting.get("transcript") or ""
+    if transcript:
+        H2("Transcriere")
+        P(transcript)
+
+    # ---- Output ----
     pdf_bytes = pdf.output()
     buffer = BytesIO(pdf_bytes)
-    
-    safe_title = re.sub(r'[^\w\s-]', '', title_safe).strip().replace(' ', '_')[:30]
-    safe_date = date_str.replace('.', '-').replace(' ', '_').replace(':', '-') if date_str else 'no-date'
-    filename = f"GAL_{safe_title}_{safe_date}.pdf"
-    
+
+    title_safe = transliterate_ro(title)
+    safe_title = re.sub(r'[^\w\s-]', '', title_safe).strip().replace(' ', '_')[:50]
+    filename = f"Sedinta_{safe_title}.pdf"
+
     return StreamingResponse(
         buffer,
         media_type="application/pdf",
@@ -4072,82 +4187,129 @@ async def export_pdf(meeting_id: str, user: dict = Depends(get_current_user)):
 
 @app.get("/api/meetings/{meeting_id}/export/docx")
 async def export_docx(meeting_id: str, user: dict = Depends(get_current_user)):
-    """Export meeting as DOCX."""
+    """Export meeting as DOCX — full content from vertical_config + transcript."""
     meeting = await verify_meeting_ownership(meeting_id, user)
-    
+
     from docx import Document
-    from docx.shared import Pt, Inches
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    
+    from docx.shared import Pt
+
     doc = Document()
     style = doc.styles['Normal']
-    font = style.font
-    font.name = 'Calibri'
-    font.size = Pt(11)
-    
+    style.font.name = 'Calibri'
+    style.font.size = Pt(11)
+
+    # ---- Title ----
     title = meeting.get("title", "Ședință") or "Ședință"
     doc.add_heading(title, level=1)
-    
-    locality = meeting.get("locality", "Necunoscut") or "Necunoscut"
-    date_str = meeting.get("date", "")
-    if date_str:
-        try:
-            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-            date_str = dt.strftime("%d.%m.%Y %H:%M")
-        except (ValueError, AttributeError):
-            pass
-    
+
+    # ---- Locality + Date (Europe/Bucharest) ----
+    locality = _get_meeting_section(meeting, "loc_desfasurare", "locality", default="Necunoscut")
+    date_value = _get_meeting_section(meeting, "data_desfasurare", "date") or meeting.get("created_at")
+
     p = doc.add_paragraph()
-    p.add_run(f"Localitate: ").bold = True
-    p.add_run(locality)
+    p.add_run("Localitate: ").bold = True
+    p.add_run(str(locality))
     p = doc.add_paragraph()
-    p.add_run(f"Data: ").bold = True
-    p.add_run(date_str)
-    
-    # Summary
-    summary = meeting.get("summary", [])
-    if summary:
-        doc.add_heading("Rezumat", level=2)
-        for item in summary:
-            doc.add_paragraph(item, style='List Bullet')
-    
-    # Key Points
-    key_points = meeting.get("key_points", [])
-    if key_points:
-        doc.add_heading("Puncte cheie", level=2)
-        for item in key_points:
-            doc.add_paragraph(item, style='List Bullet')
-    
-    # Actions
-    actions = meeting.get("actions", [])
+    p.add_run("Data: ").bold = True
+    p.add_run(_format_date_ro(date_value))
+
+    # ---- Participanți ----
+    participants = _get_meeting_section(meeting, "participanti", "participants")
+    if participants:
+        doc.add_heading("Participanți", level=2)
+        if isinstance(participants, list):
+            for item in participants:
+                doc.add_paragraph(str(item), style='List Bullet')
+        else:
+            doc.add_paragraph(str(participants))
+
+    # ---- Subiecte / Ordinea de zi ----
+    agenda = _get_meeting_section(meeting, "ordine_de_zi", "subiecte_discutate", "agenda")
+    if agenda:
+        doc.add_heading("Subiecte discutate", level=2)
+        if isinstance(agenda, list):
+            for i, item in enumerate(agenda, 1):
+                doc.add_paragraph(f"{i}. {item}")
+        else:
+            doc.add_paragraph(str(agenda))
+
+    # ---- Decizii ----
+    decisions = _get_meeting_section(meeting, "decizii", "hotarari", "decizii_luate")
+    if decisions:
+        doc.add_heading("Decizii", level=2)
+        if isinstance(decisions, list):
+            for item in decisions:
+                doc.add_paragraph(str(item), style='List Bullet')
+        else:
+            doc.add_paragraph(str(decisions))
+
+    # ---- Acțiuni de urmat ----
+    actions = _get_meeting_section(meeting, "actiuni_de_urmat", "actions")
     if actions:
-        doc.add_heading("Acțiuni", level=2)
-        table = doc.add_table(rows=1, cols=4)
-        table.style = 'Table Grid'
-        hdr_cells = table.rows[0].cells
-        hdr_cells[0].text = 'Status'
-        hdr_cells[1].text = 'Acțiune'
-        hdr_cells[2].text = 'Responsabil'
-        hdr_cells[3].text = 'Termen'
-        
-        for action in actions:
-            row_cells = table.add_row().cells
-            row_cells[0].text = '✓' if action.get('completed') else '○'
-            row_cells[1].text = action.get('text', '')
-            row_cells[2].text = action.get('owner', '-') or '-'
-            row_cells[3].text = action.get('deadline', '-') or '-'
-    
-    # Transcript
-    transcript = meeting.get("transcript", "")
+        doc.add_heading("Acțiuni de urmat", level=2)
+        if isinstance(actions, list):
+            table = doc.add_table(rows=1, cols=3)
+            table.style = 'Table Grid'
+            hdr = table.rows[0].cells
+            hdr[0].text = 'Acțiune'
+            hdr[1].text = 'Responsabil'
+            hdr[2].text = 'Termen'
+            for a in actions:
+                norm = _coerce_action_item(a)
+                row = table.add_row().cells
+                row[0].text = norm["text"]
+                row[1].text = norm["owner"]
+                row[2].text = norm["deadline"]
+        else:
+            doc.add_paragraph(str(actions))
+
+    # ---- Concluzii ----
+    concluzii = _get_meeting_section(meeting, "concluzii", "concluzia")
+    if concluzii:
+        doc.add_heading("Concluzii", level=2)
+        if isinstance(concluzii, list):
+            for c in concluzii:
+                doc.add_paragraph(str(c), style='List Bullet')
+        else:
+            doc.add_paragraph(str(concluzii))
+
+    # ---- Observații ----
+    observatii = _get_meeting_section(meeting, "observatii", "observations")
+    if observatii:
+        doc.add_heading("Observații", level=2)
+        if isinstance(observatii, list):
+            for o in observatii:
+                doc.add_paragraph(str(o), style='List Bullet')
+        else:
+            doc.add_paragraph(str(observatii))
+
+    # ---- Dezbateri (diarized, dacă există) ----
+    diarized = meeting.get("diarized_transcript") or []
+    if diarized:
+        doc.add_heading("Dezbateri", level=2)
+        for entry in diarized:
+            speaker = entry.get("speaker") or "Vorbitor"
+            timestamp = entry.get("timestamp") or ""
+            text = entry.get("text") or ""
+            label = f"{speaker}"
+            if timestamp:
+                label += f" — {timestamp}"
+            label += ":"
+            p = doc.add_paragraph()
+            p.add_run(label).bold = True
+            p.add_run(f" {text}")
+
+    # ---- Transcriere ----
+    transcript = meeting.get("transcript") or ""
     if transcript:
-        doc.add_heading("Transcriere", level=2)
+        doc.add_heading("Transcriere completă", level=2)
         doc.add_paragraph(transcript)
-    
-    # Output
+
+    # ---- Output ----
     buffer = BytesIO()
     doc.save(buffer)
     buffer.seek(0)
-    
+
     safe_title = re.sub(r'[^\w\s-]', '', transliterate_ro(title)).strip().replace(' ', '_')[:50]
     filename = f"Sedinta_{safe_title}.docx"
 
