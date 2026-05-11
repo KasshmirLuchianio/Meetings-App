@@ -4826,60 +4826,223 @@ async def payment_cancel():
 
 # ==================== LEGAL PAGES (App Store / Google Play) ====================
 
+_LEGAL_CSS = (
+    "body{font-family:'Segoe UI',system-ui,sans-serif;max-width:820px;"
+    "margin:40px auto;padding:0 20px;line-height:1.7;color:#333}"
+    "h1{color:#1B2A4A}h2{color:#1B2A4A;margin-top:28px}"
+    ".company-block{background:#F5F2EA;border-left:4px solid #1B2A4A;"
+    "padding:14px 18px;border-radius:4px;margin:20px 0;font-size:14px}"
+    "footer{margin-top:48px;padding-top:24px;border-top:1px solid #E5E7EB;"
+    "font-size:13px;color:#6B7280;text-align:center}"
+)
+
+
 @app.get("/privacy", response_class=HTMLResponse)
 async def privacy_policy():
-    return HTMLResponse("""
-    <html>
+    return HTMLResponse(f"""
+    <html lang="ro">
     <head><title>Politică de Confidențialitate — Meetings.ro</title>
     <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>body{font-family:'Segoe UI',system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.7;color:#333}h1{color:#1B2A4A}h2{color:#1B2A4A;margin-top:28px}</style>
+    <style>{_LEGAL_CSS}</style>
     </head>
     <body>
     <h1>Politică de Confidențialitate</h1>
-    <p>Ultima actualizare: Aprilie 2026</p>
+    <p><em>Ultima actualizare: Mai 2026</em></p>
+
+    <h2>Operatorul datelor cu caracter personal</h2>
+    <p>Operatorul datelor dumneavoastră cu caracter personal este <strong>NEDEROV COMEX S.R.L.</strong>
+    (operând platforma și brandul Meetings.ro / Kashmir Digital), persoană juridică română, având:</p>
+    <div class="company-block">
+      • <strong>Cod Unic de Înregistrare (CUI):</strong> 46076724<br>
+      • <strong>Nr. Registrul Comerțului:</strong> J40/8510/2022<br>
+      • <strong>Sediu social:</strong> București, Sector 4, Str. Ienăchiță Văcărescu nr. 36, ap. 5<br>
+      • <strong>Capital social:</strong> 200 RON<br>
+      • <strong>Email contact GDPR:</strong> support@meetings-ro.app<br>
+      • <strong>Telefon:</strong> 0793 693 875
+    </div>
+    <p>Pentru orice solicitări privind exercitarea drepturilor GDPR (dreptul de acces, rectificare,
+    portabilitate, ștergere, opoziție, restricționare), ne puteți contacta la adresa de email:
+    <strong>support@meetings-ro.app</strong>.</p>
+
+    <h2>Vârsta minimă</h2>
+    <p>Serviciile noastre se adresează exclusiv persoanelor cu vârsta de cel puțin
+    <strong>16 ani</strong>. NEDEROV COMEX S.R.L. nu colectează cu bună știință date cu caracter
+    personal de la persoane sub această vârstă.</p>
+
     <h2>Date colectate</h2>
-    <p>Meetings.ro colectează: adresă email, numele utilizatorului, înregistrări audio ale ședințelor, transcrieri și rapoarte generate automat.</p>
+    <p>Meetings.ro colectează următoarele categorii de date personale:</p>
+    <ul>
+      <li><strong>Date de cont:</strong> adresa de email, numele utilizatorului, parola (criptată)</li>
+      <li><strong>Date de facturare:</strong> nume / denumire companie, CUI (pentru persoane juridice),
+      adresa de facturare</li>
+      <li><strong>Conținut audio:</strong> înregistrări ale ședințelor încărcate voluntar de utilizator</li>
+      <li><strong>Date derivate:</strong> transcrieri, rapoarte și analize generate automat din audio</li>
+      <li><strong>Date tehnice:</strong> jurnale de utilizare, adrese IP (folosite pentru securitate și prevenirea abuzului)</li>
+    </ul>
+
     <h2>Utilizarea datelor</h2>
-    <p>Datele sunt folosite exclusiv pentru generarea transcrierilor și rapoartelor solicitate de utilizator. Nu vindem și nu partajăm datele cu terți.</p>
+    <p>Datele sunt folosite exclusiv pentru:</p>
+    <ul>
+      <li>Furnizarea serviciilor de transcriere și generare de rapoarte AI</li>
+      <li>Emiterea facturilor fiscale și raportarea obligatorie către ANAF (e-Factura)</li>
+      <li>Comunicări tranzacționale (verificare email, confirmări plăți)</li>
+      <li>Securitatea platformei și prevenirea abuzului</li>
+    </ul>
+    <p>Nu vindem și nu transferăm datele dumneavoastră către terți în scopuri de marketing.</p>
+
     <h2>Stocarea datelor</h2>
-    <p>Datele sunt stocate pe servere securizate în Europa (Frankfurt, Germania) prin intermediul platformei Render.com și MongoDB Atlas.</p>
-    <h2>Servicii terțe</h2>
-    <p>Folosim: Groq/OpenAI (transcriere audio), Anthropic Claude (extracție date), Stripe (plăți), Resend (email-uri tranzacționale). Fiecare serviciu procesează doar datele minime necesare.</p>
+    <p>Datele sunt stocate pe servere securizate în Uniunea Europeană (Frankfurt, Germania) prin
+    intermediul platformelor Render.com (procesare) și MongoDB Atlas (bază de date), conform
+    standardelor GDPR.</p>
+
+    <h2>Servicii terțe (sub-procesatori)</h2>
+    <p>Pentru funcționarea platformei, NEDEROV COMEX S.R.L. transmite date strict minim necesare
+    către următorii sub-procesatori:</p>
+    <ul>
+      <li><strong>Groq Inc. / OpenAI:</strong> transcriere audio (audio temporar)</li>
+      <li><strong>Anthropic PBC:</strong> extracție și structurare informații din transcript</li>
+      <li><strong>Stripe Payments Europe Ltd:</strong> procesare plăți (date card NU sunt vizibile pentru noi)</li>
+      <li><strong>SmartBill (Intelligent IT S.R.L.) &amp; ANAF (SPV):</strong> Pentru procesarea plăților și
+      emiterea facturilor fiscale, NEDEROV COMEX S.R.L. colectează datele de facturare furnizate de utilizator
+      (Nume / Denumire companie, CUI, Adresă). Aceste date sunt introduse în platforma procesatorului nostru
+      de facturare (SmartBill) și transmise obligatoriu prin lege către <strong>Agenția Națională de
+      Administrare Fiscală (ANAF)</strong> prin sistemul național RO e-Factura.</li>
+      <li><strong>Resend Inc.:</strong> trimitere emailuri tranzacționale</li>
+      <li><strong>Sentry (Functional Software Inc.):</strong> monitorizare erori tehnice (poate captura
+      contextual emailul utilizatorului în jurnal de erori pentru depanare)</li>
+    </ul>
+
     <h2>Drepturi GDPR</h2>
-    <p>Ai dreptul la acces, rectificare, portabilitate și ștergere a datelor tale. Pentru orice solicitare, contactează-ne la adresa de mai jos.</p>
+    <p>Conform Regulamentului UE 2016/679 (GDPR), aveți următoarele drepturi:</p>
+    <ul>
+      <li>Dreptul de acces la datele dumneavoastră</li>
+      <li>Dreptul de rectificare</li>
+      <li>Dreptul de ștergere ("dreptul de a fi uitat")</li>
+      <li>Dreptul de portabilitate</li>
+      <li>Dreptul de opoziție la prelucrare</li>
+      <li>Dreptul de restricționare a prelucrării</li>
+      <li>Dreptul de a depune o plângere la Autoritatea Națională de Supraveghere a Prelucrării Datelor cu Caracter Personal (ANSPDCP)</li>
+    </ul>
+    <p>Pentru exercitarea oricăruia dintre aceste drepturi, contactați-ne la
+    <strong>support@meetings-ro.app</strong>.</p>
+
     <h2>Retenția datelor</h2>
-    <p>Înregistrările audio și transcrierile sunt păstrate atât timp cât contul este activ. La ștergerea contului, toate datele sunt eliminate în maxim 30 de zile.</p>
+    <p>Înregistrările audio sunt șterse implicit după procesare (GDPR-compliant). Utilizatorul poate
+    opta din setări pentru păstrarea fișierelor audio. Transcrierile și rapoartele sunt păstrate cât
+    timp contul este activ. La ștergerea contului, toate datele personale sunt eliminate în maxim
+    <strong>30 de zile</strong>, cu excepția datelor de facturare care sunt păstrate conform
+    obligațiilor legale fiscale (10 ani).</p>
+
+    <h2>Modificări ale politicii</h2>
+    <p>Ne rezervăm dreptul de a modifica această politică. Modificările semnificative vor fi notificate
+    utilizatorilor cu minim 14 zile înainte, prin email și prin notificare în aplicație.</p>
+
     <h2>Contact</h2>
-    <p>hello@meetings.ro</p>
+    <p>NEDEROV COMEX S.R.L.<br>
+    Email: <strong>support@meetings-ro.app</strong><br>
+    Telefon: 0793 693 875<br>
+    Sediu: București, Sector 4, Str. Ienăchiță Văcărescu nr. 36, ap. 5</p>
+
+    <footer>© 2026 NEDEROV COMEX S.R.L. Toate drepturile rezervate. CUI: 46076724.</footer>
     </body></html>
     """)
 
 
 @app.get("/terms", response_class=HTMLResponse)
 async def terms_of_service():
-    return HTMLResponse("""
-    <html>
+    return HTMLResponse(f"""
+    <html lang="ro">
     <head><title>Termeni și Condiții — Meetings.ro</title>
     <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>body{font-family:'Segoe UI',system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;line-height:1.7;color:#333}h1{color:#1B2A4A}h2{color:#1B2A4A;margin-top:28px}</style>
+    <style>{_LEGAL_CSS}</style>
     </head>
     <body>
     <h1>Termeni și Condiții</h1>
-    <p>Ultima actualizare: Aprilie 2026</p>
+    <p><em>Ultima actualizare: Mai 2026</em></p>
+
+    <h2>Identificarea părților</h2>
+    <p>Prezentul document reprezintă un contract cu forță juridică obligatorie încheiat între
+    utilizator și <strong>NEDEROV COMEX S.R.L.</strong> (operând platforma și brandul Meetings.ro /
+    Kashmir Digital), persoană juridică română, având:</p>
+    <div class="company-block">
+      • <strong>Cod Unic de Înregistrare (CUI):</strong> 46076724<br>
+      • <strong>Nr. Registrul Comerțului:</strong> J40/8510/2022<br>
+      • <strong>Sediu social:</strong> București, Sector 4, Str. Ienăchiță Văcărescu nr. 36, ap. 5<br>
+      • <strong>Capital social:</strong> 200 RON
+    </div>
+    <p><strong>Date de contact oficiale:</strong></p>
+    <ul>
+      <li>Telefon: 0793 693 875</li>
+      <li>Email suport și notificări legale: <strong>support@meetings-ro.app</strong></li>
+    </ul>
+    <p>Acest contract este guvernat de legislația din România. Orice dispută va fi soluționată pe
+    cale amiabilă sau de către instanțele judecătorești competente din București.</p>
+
     <h2>Serviciul</h2>
-    <p>Meetings.ro oferă servicii de transcriere automată și generare rapoarte AI pentru ședințe profesionale, disponibile prin aplicație mobilă.</p>
+    <p>Meetings.ro oferă servicii de transcriere automată și generare rapoarte AI pentru ședințe
+    profesionale, disponibile prin aplicație mobilă Android (Google Play) și interfață web.</p>
+
     <h2>Cont și responsabilitate</h2>
-    <p>Ești responsabil pentru securitatea contului tău și pentru conținutul înregistrărilor uploadate. Nu este permisă înregistrarea fără consimțământul participanților.</p>
+    <p>Ești responsabil pentru securitatea contului tău (păstrarea parolei confidențiale) și pentru
+    conținutul înregistrărilor uploadate. Nu este permisă înregistrarea conversațiilor fără
+    consimțământul informat al participanților, conform legii române (Codul Penal art. 226).</p>
+
     <h2>Planuri și plăți</h2>
-    <p>Planul gratuit include 5 întâlniri pe lună. Abonamentele plătite (Pro, Enterprise) sunt lunare sau anuale, procesate prin Stripe. Anularea se poate face oricând, cu efect la finalul perioadei plătite.</p>
+    <p>Meetings.ro oferă următoarele planuri de utilizare:</p>
+    <ul>
+      <li><strong>Starter (gratuit):</strong> 15 minute audio per lună, funcționalități de bază</li>
+      <li><strong>Pro:</strong> 19,99 EUR / lună sau 182 EUR / an — 300 minute audio per lună, export PDF + DOCX, toate verticalele AI</li>
+      <li><strong>Enterprise:</strong> 99 EUR / lună sau 950 EUR / an — minute nelimitate, manager dedicat, SLA</li>
+    </ul>
+    <p>Plățile sunt procesate prin <strong>Stripe Payments Europe Ltd</strong>. Facturile fiscale
+    se emit automat de NEDEROV COMEX S.R.L. prin platforma <strong>SmartBill</strong>, în RON, cu
+    TVA 21% conform legislației române în vigoare, și se transmit obligatoriu la ANAF prin sistemul
+    RO e-Factura.</p>
+
+    <h2>Dreptul de retragere (consumatori)</h2>
+    <p>Conform Directivei UE 2011/83/UE și OUG 34/2014, consumatorii (persoane fizice) au dreptul
+    de a se retrage din contract în termen de <strong>14 zile calendaristice</strong> de la
+    activarea abonamentului, fără a invoca un motiv, prin notificare scrisă la
+    <strong>support@meetings-ro.app</strong>. Rambursarea se efectuează în maxim 14 zile de la
+    primirea notificării, prin aceeași metodă folosită la plată.</p>
+    <p>Prin acceptarea acestor termeni și utilizarea efectivă a serviciului (peste 15 minute audio
+    procesate în primele 14 zile), utilizatorul declară expres că este de acord cu începerea
+    imediată a prestării serviciului și înțelege că își pierde dreptul de retragere proporțional cu
+    consumul efectiv.</p>
+
+    <h2>Anulare</h2>
+    <p>Anularea abonamentului se poate face oricând din aplicație → Setări → Gestionează
+    abonamentul, sau direct prin Stripe Customer Portal. Anularea are efect la finalul perioadei
+    deja plătite, fără returnare proporțională, cu excepția cazurilor descrise mai sus.</p>
+
     <h2>Proprietate intelectuală</h2>
-    <p>Conținutul înregistrărilor și transcrierilor tale îți aparține. Meetings.ro deține drepturile asupra platformei, designului și algoritmilor.</p>
+    <p>Conținutul înregistrărilor și transcrierilor tale îți aparține integral. NEDEROV COMEX S.R.L.
+    deține toate drepturile de proprietate intelectuală asupra platformei, designului, algoritmilor
+    și mărcii Meetings.ro.</p>
+
     <h2>Limitarea răspunderii</h2>
-    <p>Meetings.ro nu garantează acuratețea 100% a transcrierilor sau a rapoartelor generate. Serviciul este furnizat "așa cum este".</p>
+    <p>NEDEROV COMEX S.R.L. furnizează aplicația Meetings.ro <strong>„ca atare" (as is)</strong>.
+    Nu garantăm acuratețea 100% a transcrierilor sau a rapoartelor generate prin AI. Răspunderea
+    noastră maximă cumulată pentru orice pretenții directe derivate din utilizarea platformei este
+    strict limitată la <strong>suma totală plătită de utilizator către NEDEROV COMEX S.R.L. pentru
+    serviciu în ultimele 3 luni calendaristice premergătoare evenimentului care a generat dauna</strong>.</p>
+
     <h2>Modificări ale termenilor</h2>
-    <p>Ne rezervăm dreptul de a modifica acești termeni. Utilizatorii vor fi notificați prin email cu minim 14 zile înainte.</p>
+    <p>Ne rezervăm dreptul de a modifica acești termeni. Utilizatorii vor fi notificați prin email
+    cu minim 14 zile înainte de intrarea în vigoare a modificărilor.</p>
+
+    <h2>Soluționarea disputelor</h2>
+    <p>Orice neînțelegere apărută în legătură cu prezentul contract va fi soluționată pe cale
+    amiabilă. În cazul în care soluționarea amiabilă nu este posibilă, litigiile vor fi deferite
+    instanțelor judecătorești competente din <strong>București, România</strong>.</p>
+
     <h2>Contact</h2>
-    <p>hello@meetings.ro</p>
+    <p>NEDEROV COMEX S.R.L.<br>
+    Email: <strong>support@meetings-ro.app</strong><br>
+    Telefon: 0793 693 875<br>
+    Sediu: București, Sector 4, Str. Ienăchiță Văcărescu nr. 36, ap. 5</p>
+
+    <footer>© 2026 NEDEROV COMEX S.R.L. Toate drepturile rezervate. CUI: 46076724.</footer>
     </body></html>
     """)
 
