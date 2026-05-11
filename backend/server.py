@@ -4326,18 +4326,20 @@ async def export_docx(meeting_id: str, user: dict = Depends(get_current_user)):
 async def export_proces_verbal(meeting_id: str, user: dict = Depends(get_current_user)):
     """Export meeting as formal Proces Verbal (minutes) DOCX — institutional format.
 
-    Used by mayors, secretaries, councilors and clerks in public institutions.
-    Produces a formally structured document with:
-      - Header (institution, date, participants, quorum)
-      - Agenda (ordinea de zi)
-      - Dezbateri (per speaker, from diarized transcript)
-      - Hotărâri / Decizii adoptate
-      - Semnături
+    Reads from meeting top-level fields AND meeting.vertical_config (via _get_meeting_section helper).
+    ALWAYS includes the transcript at the bottom even if structured fields are empty.
     """
     meeting = await verify_meeting_ownership(meeting_id, user)
 
+    # Diagnostic log — helps debug missing-content reports
+    vc_dbg = meeting.get("vertical_config") or {}
+    print(f"[ProcesVerbal] meeting={meeting_id} title={meeting.get('title')!r} "
+          f"status={meeting.get('status')} transcript_len={len(meeting.get('transcript') or '')} "
+          f"diarized_count={len(meeting.get('diarized_transcript') or [])} "
+          f"vc_keys={list(vc_dbg.keys())}")
+
     from docx import Document
-    from docx.shared import Pt, Inches, RGBColor, Cm
+    from docx.shared import Pt, RGBColor, Cm
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     doc = Document()
@@ -4351,15 +4353,14 @@ async def export_proces_verbal(meeting_id: str, user: dict = Depends(get_current
 
     # Base style
     style = doc.styles['Normal']
-    font = style.font
-    font.name = 'Times New Roman'
-    font.size = Pt(12)
+    style.font.name = 'Times New Roman'
+    style.font.size = Pt(12)
 
     # ---- ANTET (Header) ----
-    institution = meeting.get("locality") or user.get("company") or "Instituție"
+    institution = _get_meeting_section(meeting, "locality", default=None) or user.get("company") or "Instituție"
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run(institution.upper())
+    run = p.add_run(str(institution).upper())
     run.bold = True
     run.font.size = Pt(14)
 
@@ -4377,34 +4378,19 @@ async def export_proces_verbal(meeting_id: str, user: dict = Depends(get_current
 
     doc.add_paragraph()  # spacer
 
-    # ---- DATA / LOC ----
-    date_str = meeting.get("date") or meeting.get("data_desfasurare") or ""
-    if date_str:
-        try:
-            dt = datetime.fromisoformat(str(date_str).replace("Z", "+00:00"))
-            date_fmt = dt.strftime("%d.%m.%Y, ora %H:%M")
-        except (ValueError, AttributeError):
-            date_fmt = str(date_str)
-    else:
-        date_fmt = "—"
-
+    # ---- DATA / LOC (now reads from vertical_config too, formatted in Europe/Bucharest) ----
+    date_value = _get_meeting_section(meeting, "data_desfasurare", "date") or meeting.get("created_at")
     p = doc.add_paragraph()
     p.add_run("Data și ora desfășurării: ").bold = True
-    p.add_run(date_fmt)
+    p.add_run(_format_date_ro(date_value))
 
-    loc = meeting.get("loc_desfasurare") or meeting.get("locality") or "—"
+    loc = _get_meeting_section(meeting, "loc_desfasurare", "locality", default="—")
     p = doc.add_paragraph()
     p.add_run("Locul desfășurării: ").bold = True
     p.add_run(str(loc))
 
-    # Participanți
-    vc = meeting.get("vertical_config") or {}
-    participants = (
-        vc.get("participanti")
-        or vc.get("participants")
-        or meeting.get("participanti")
-        or []
-    )
+    # ---- Participanți ----
+    participants = _get_meeting_section(meeting, "participanti", "participants")
     if participants:
         doc.add_paragraph()
         p = doc.add_paragraph()
@@ -4416,31 +4402,27 @@ async def export_proces_verbal(meeting_id: str, user: dict = Depends(get_current
             p.add_run(str(participants))
 
     # ---- ORDINEA DE ZI ----
-    agenda = (
-        vc.get("ordine_de_zi")
-        or vc.get("subiecte_discutate")
-        or vc.get("agenda")
-        or []
-    )
+    agenda = _get_meeting_section(meeting, "ordine_de_zi", "subiecte_discutate", "agenda")
     if agenda:
         doc.add_paragraph()
-        h = doc.add_heading("ORDINEA DE ZI", level=2)
+        doc.add_heading("ORDINEA DE ZI", level=2)
         if isinstance(agenda, list):
             for i, item in enumerate(agenda, 1):
                 doc.add_paragraph(f"{i}. {item}")
         else:
             doc.add_paragraph(str(agenda))
 
-    # ---- DEZBATERI (from diarized transcript) ----
+    # ---- DEZBATERI ----
     diarized = meeting.get("diarized_transcript") or []
+    transcript = meeting.get("transcript") or ""
     if diarized:
         doc.add_paragraph()
         doc.add_heading("DEZBATERI", level=2)
         for entry in diarized:
-            speaker = entry.get("speaker") or "Vorbitor"
-            role = entry.get("role") or ""
-            timestamp = entry.get("timestamp") or ""
-            text = entry.get("text") or ""
+            speaker = (entry.get("speaker") or "Vorbitor") if isinstance(entry, dict) else "Vorbitor"
+            role = (entry.get("role") or "") if isinstance(entry, dict) else ""
+            timestamp = (entry.get("timestamp") or "") if isinstance(entry, dict) else ""
+            text = (entry.get("text") or "") if isinstance(entry, dict) else str(entry)
             p = doc.add_paragraph()
             label = f"{speaker}"
             if role:
@@ -4451,21 +4433,14 @@ async def export_proces_verbal(meeting_id: str, user: dict = Depends(get_current
             run = p.add_run(label)
             run.bold = True
             p.add_run(f" {text}")
-    else:
-        # Fallback: raw transcript
-        transcript = meeting.get("transcript", "")
-        if transcript:
-            doc.add_paragraph()
-            doc.add_heading("DEZBATERI", level=2)
-            doc.add_paragraph(transcript)
+    elif transcript:
+        # Fallback: raw transcript when diarization is missing
+        doc.add_paragraph()
+        doc.add_heading("DEZBATERI", level=2)
+        doc.add_paragraph(transcript)
 
     # ---- HOTĂRÂRI / DECIZII ----
-    decisions = (
-        vc.get("decizii")
-        or vc.get("hotarari")
-        or vc.get("decizii_luate")
-        or []
-    )
+    decisions = _get_meeting_section(meeting, "decizii", "hotarari", "decizii_luate")
     if decisions:
         doc.add_paragraph()
         doc.add_heading("HOTĂRÂRI ADOPTATE", level=2)
@@ -4476,35 +4451,28 @@ async def export_proces_verbal(meeting_id: str, user: dict = Depends(get_current
             doc.add_paragraph(str(decisions))
 
     # ---- ACȚIUNI DE URMAT ----
-    actions = (
-        vc.get("actiuni_de_urmat")
-        or vc.get("actions")
-        or meeting.get("actions")
-        or []
-    )
+    actions = _get_meeting_section(meeting, "actiuni_de_urmat", "actions")
     if actions:
         doc.add_paragraph()
         doc.add_heading("ACȚIUNI STABILITE", level=2)
-        table = doc.add_table(rows=1, cols=3)
-        table.style = 'Table Grid'
-        hdr = table.rows[0].cells
-        hdr[0].text = 'Acțiune'
-        hdr[1].text = 'Responsabil'
-        hdr[2].text = 'Termen'
         if isinstance(actions, list):
+            table = doc.add_table(rows=1, cols=3)
+            table.style = 'Table Grid'
+            hdr = table.rows[0].cells
+            hdr[0].text = 'Acțiune'
+            hdr[1].text = 'Responsabil'
+            hdr[2].text = 'Termen'
             for a in actions:
+                norm = _coerce_action_item(a)
                 row = table.add_row().cells
-                if isinstance(a, dict):
-                    row[0].text = str(a.get('text') or a.get('actiune') or '')
-                    row[1].text = str(a.get('owner') or a.get('responsabil') or '-')
-                    row[2].text = str(a.get('deadline') or a.get('termen') or '-')
-                else:
-                    row[0].text = str(a)
-                    row[1].text = '-'
-                    row[2].text = '-'
+                row[0].text = norm["text"]
+                row[1].text = norm["owner"]
+                row[2].text = norm["deadline"]
+        else:
+            doc.add_paragraph(str(actions))
 
     # ---- CONCLUZII ----
-    conclusions = vc.get("concluzii") or meeting.get("concluzia") or ""
+    conclusions = _get_meeting_section(meeting, "concluzii", "concluzia")
     if conclusions:
         doc.add_paragraph()
         doc.add_heading("CONCLUZII", level=2)
@@ -4513,6 +4481,23 @@ async def export_proces_verbal(meeting_id: str, user: dict = Depends(get_current
                 doc.add_paragraph(str(c))
         else:
             doc.add_paragraph(str(conclusions))
+
+    # ---- OBSERVAȚII ----
+    observatii = _get_meeting_section(meeting, "observatii", "observations")
+    if observatii:
+        doc.add_paragraph()
+        doc.add_heading("OBSERVAȚII", level=2)
+        if isinstance(observatii, list):
+            for o in observatii:
+                doc.add_paragraph(str(o))
+        else:
+            doc.add_paragraph(str(observatii))
+
+    # ---- TRANSCRIERE COMPLETĂ (always include if exists, even if diarized was used above) ----
+    if transcript:
+        doc.add_paragraph()
+        doc.add_heading("TRANSCRIERE COMPLETĂ", level=2)
+        doc.add_paragraph(transcript)
 
     # ---- SEMNĂTURI ----
     doc.add_paragraph()
