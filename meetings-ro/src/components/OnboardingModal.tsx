@@ -217,7 +217,7 @@ export default function OnboardingModal({ onDone }: { onDone: () => void }) {
             transform: [{ translateY: contentSlide }],
             alignItems: 'center',
             alignSelf: 'stretch',
-            gap: 16,
+            gap: 12,
           }}
         >
           <Text style={styles.title}>{slide.title}</Text>
@@ -294,15 +294,15 @@ const styles = StyleSheet.create({
     paddingBottom: 60,
     alignItems: 'center',
     justifyContent: 'flex-start',
-    paddingTop: 24,
-    gap: 16,
+    paddingTop: 12,
+    gap: 12,
   },
   welcome: {
     fontSize: 11,
     fontWeight: APPLE_EYEBROW_WEIGHT,  // 600 on iOS (SF Pro), 500 on Android (Roboto)
     color: 'rgba(255,255,255,0.55)',
     textAlign: 'center',
-    marginBottom: 14,
+    marginBottom: 2,  // tight visual coupling to the title (Apple iOS Hello pattern)
     // letterSpacing is animated inline via Animated.Text (idle 3.5 → pressed 2.6)
   },
   title: {
