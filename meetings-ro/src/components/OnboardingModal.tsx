@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, Dimensions,
-  TouchableOpacity, Animated, Easing, StatusBar,
+  TouchableOpacity, Animated, Easing, StatusBar, Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -45,10 +45,25 @@ const SLIDES = [
   },
 ];
 
+// Apple-style platform-specific font weight for tracked uppercase eyebrows.
+// SF Pro Display at 600 is perfect; Android Roboto at 600 is too dense — drop to 500.
+const APPLE_EYEBROW_WEIGHT: '600' | '500' = Platform.OS === 'ios' ? '600' : '500';
+
+// letterSpacing values for the welcome eyebrow at idle / pressed states.
+const WELCOME_TRACK_IDLE = 3.5;
+const WELCOME_TRACK_PRESSED = 2.6;
+
 export default function OnboardingModal({ onDone }: { onDone: () => void }) {
   const { user } = useAuth();
   const [currentSlide, setCurrentSlide] = useState(0);
   const bgOpacity = useRef(new Animated.Value(0)).current;
+
+  // Welcome eyebrow has its own animation values so it can enter ~120ms BEFORE the title.
+  const welcomeFade = useRef(new Animated.Value(0)).current;
+  const welcomeSlide = useRef(new Animated.Value(20)).current;
+  const welcomeTrack = useRef(new Animated.Value(WELCOME_TRACK_IDLE)).current;
+
+  // Title / subtitle / dots / CTA enter as one group, delayed.
   const contentFade = useRef(new Animated.Value(0)).current;
   const contentSlide = useRef(new Animated.Value(30)).current;
 
@@ -65,22 +80,66 @@ export default function OnboardingModal({ onDone }: { onDone: () => void }) {
   }, [currentSlide]);
 
   const animateContent = () => {
+    // Reset all entrance values
+    welcomeFade.setValue(0);
+    welcomeSlide.setValue(20);
     contentFade.setValue(0);
     contentSlide.setValue(30);
+
+    // 1. Welcome eyebrow enters first — softer easing, shorter duration.
     Animated.parallel([
-      Animated.timing(contentFade, {
+      Animated.timing(welcomeFade, {
         toValue: 1,
-        duration: 500,
+        duration: 420,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
-      Animated.spring(contentSlide, {
+      Animated.spring(welcomeSlide, {
         toValue: 0,
-        tension: 70,
-        friction: 10,
+        tension: 80,
+        friction: 12,
         useNativeDriver: true,
       }),
     ]).start();
+
+    // 2. Title + rest enter 120ms later (Apple-style deliberate stagger).
+    setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(contentFade, {
+          toValue: 1,
+          duration: 500,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.spring(contentSlide, {
+          toValue: 0,
+          tension: 70,
+          friction: 10,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }, 120);
+  };
+
+  // Press feedback: when CTA is pressed, the welcome eyebrow's tracking subtly
+  // tightens — creates a sense that the whole screen "leans in" with the user.
+  // letterSpacing is a layout property → must use useNativeDriver:false.
+  const handlePressIn = () => {
+    Animated.timing(welcomeTrack, {
+      toValue: WELCOME_TRACK_PRESSED,
+      duration: 140,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.timing(welcomeTrack, {
+      toValue: WELCOME_TRACK_IDLE,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
   };
 
   const handleNext = async () => {
@@ -132,41 +191,66 @@ export default function OnboardingModal({ onDone }: { onDone: () => void }) {
       </Animated.View>
 
       {/* Text + controls */}
-      <Animated.View style={[styles.bottomContainer, {
-        opacity: contentFade,
-        transform: [{ translateY: contentSlide }],
-      }]}>
+      <View style={styles.bottomContainer}>
+        {/* Welcome eyebrow — enters FIRST, fades + slides on its own timeline.
+            Animated.Text is required because letterSpacing animation needs JS driver. */}
         {'welcome' in slide && slide.welcome && (
-          <Text style={styles.welcome}>{slide.welcome}</Text>
+          <Animated.View
+            style={{
+              opacity: welcomeFade,
+              transform: [{ translateY: welcomeSlide }],
+              alignSelf: 'stretch',
+            }}
+          >
+            <Animated.Text
+              style={[styles.welcome, { letterSpacing: welcomeTrack }]}
+            >
+              {slide.welcome}
+            </Animated.Text>
+          </Animated.View>
         )}
-        <Text style={styles.title}>{slide.title}</Text>
-        <Text style={styles.subtitle}>{slide.subtitle}</Text>
 
-        {/* Progress dots */}
-        <View style={styles.dotsContainer}>
-          {SLIDES.map((_, index) => (
-            <View
-              key={index}
-              style={[
-                styles.dot,
-                index === currentSlide && styles.dotActive,
-                index < currentSlide && styles.dotDone,
-              ]}
-            />
-          ))}
-        </View>
-
-        {/* CTA Button */}
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={handleNext}
-          activeOpacity={0.85}
+        {/* Rest of the content — enters 120ms after the welcome eyebrow */}
+        <Animated.View
+          style={{
+            opacity: contentFade,
+            transform: [{ translateY: contentSlide }],
+            alignItems: 'center',
+            alignSelf: 'stretch',
+            gap: 16,
+          }}
         >
-          <Text style={styles.primaryButtonText}>
-            {isLast ? 'Începe' : 'Continuă'}
-          </Text>
-        </TouchableOpacity>
-      </Animated.View>
+          <Text style={styles.title}>{slide.title}</Text>
+          <Text style={styles.subtitle}>{slide.subtitle}</Text>
+
+          {/* Progress dots */}
+          <View style={styles.dotsContainer}>
+            {SLIDES.map((_, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.dot,
+                  index === currentSlide && styles.dotActive,
+                  index < currentSlide && styles.dotDone,
+                ]}
+              />
+            ))}
+          </View>
+
+          {/* CTA Button — press feedback subtly tightens welcome tracking */}
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={handleNext}
+            onPressIn={handlePressIn}
+            onPressOut={handlePressOut}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.primaryButtonText}>
+              {isLast ? 'Începe' : 'Continuă'}
+            </Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </View>
     </Animated.View>
   );
 }
@@ -215,11 +299,11 @@ const styles = StyleSheet.create({
   },
   welcome: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: APPLE_EYEBROW_WEIGHT,  // 600 on iOS (SF Pro), 500 on Android (Roboto)
     color: 'rgba(255,255,255,0.55)',
     textAlign: 'center',
-    letterSpacing: 3.5,
     marginBottom: 14,
+    // letterSpacing is animated inline via Animated.Text (idle 3.5 → pressed 2.6)
   },
   title: {
     fontSize: 30,
