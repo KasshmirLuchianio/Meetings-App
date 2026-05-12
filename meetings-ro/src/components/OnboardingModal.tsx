@@ -17,6 +17,7 @@ const SLIDES = [
   {
     id: 1,
     component: SlidePhone,
+    welcome: 'Bun venit la Meetings.ro 👋',
     title: 'Pune telefonul pe masă',
     subtitle: 'În centrul discuției, nu în buzunar.',
     gradient: ['#000000', '#0D1B2A'] as const,
@@ -135,6 +136,9 @@ export default function OnboardingModal({ onDone }: { onDone: () => void }) {
         opacity: contentFade,
         transform: [{ translateY: contentSlide }],
       }]}>
+        {'welcome' in slide && slide.welcome && (
+          <Text style={styles.welcome}>{slide.welcome}</Text>
+        )}
         <Text style={styles.title}>{slide.title}</Text>
         <Text style={styles.subtitle}>{slide.subtitle}</Text>
 
@@ -208,6 +212,15 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     paddingTop: 24,
     gap: 16,
+  },
+  welcome: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#D4AF37',
+    textAlign: 'center',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    marginBottom: 4,
   },
   title: {
     fontSize: 30,
