@@ -17,7 +17,7 @@ const SLIDES = [
   {
     id: 1,
     component: SlidePhone,
-    welcome: 'Bun venit la Meetings.ro 👋',
+    welcome: 'BUN VENIT LA MEETINGS.RO',
     title: 'Pune telefonul pe masă',
     subtitle: 'În centrul discuției, nu în buzunar.',
     gradient: ['#000000', '#0D1B2A'] as const,
@@ -214,13 +214,12 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   welcome: {
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: '600',
-    color: '#D4AF37',
+    color: 'rgba(255,255,255,0.55)',
     textAlign: 'center',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    marginBottom: 4,
+    letterSpacing: 3.5,
+    marginBottom: 14,
   },
   title: {
     fontSize: 30,
