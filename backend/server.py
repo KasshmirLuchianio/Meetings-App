@@ -99,6 +99,15 @@ SMARTBILL_CUI = "46076724"
 SMARTBILL_SERIES = "Meetings"
 SMARTBILL_BASE_URL = "https://ws.smartbill.ro/SBORO/api"
 
+# Invoicing mode: "native" (SmartBill's own Stripe integration handles invoicing,
+# recommended for production — SmartBill sees the Stripe events directly and
+# auto-generates invoices + submits e-Factura to ANAF/SPV. No duplicate risk.)
+# vs "api" (our backend calls SmartBill API directly on every Stripe webhook;
+# kept for emergency/local-dev). Default is "native".
+SMARTBILL_INVOICING_MODE = os.environ.get("SMARTBILL_INVOICING_MODE", "native").strip().lower()
+print(f"[SmartBill] Invoicing mode: {SMARTBILL_INVOICING_MODE.upper()} — "
+      f"{'using SmartBill native Stripe integration (no API calls from backend)' if SMARTBILL_INVOICING_MODE == 'native' else 'backend calls SmartBill API directly on every webhook'}")
+
 EUR_TO_RON = 4.97
 # Per-billing-cycle price tables. Keys: "<tier>" = monthly, "<tier>_yearly" = annual.
 # Used by SmartBill invoice generation so yearly subscribers get correct annual amount.
@@ -4722,19 +4731,25 @@ async def stripe_webhook(request: Request):
                 print(f"[Stripe:{WEBHOOK_VERSION}] Traceback:\n{traceback.format_exc()}")
                 # don't re-raise — invoice attempt may still succeed independently
 
-            # SmartBill invoice — never blocks, never crashes the webhook
-            try:
-                issue_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                asyncio.create_task(_create_and_save_invoice(
-                    user_email=user_email,
-                    plan=plan_tier,
-                    issue_date=issue_date,
-                    interval=interval,
-                    stripe_event_id=event_id,
-                    stripe_session_id=session.get("id"),
-                ))
-            except Exception as exc:
-                print(f"[Stripe:{WEBHOOK_VERSION}] SmartBill task scheduling failed: {type(exc).__name__}: {exc}")
+            # SmartBill invoice — only if invoicing mode is "api" (legacy/dev).
+            # In production we use SmartBill's NATIVE Stripe integration which
+            # auto-generates invoices when SmartBill sees the Stripe event itself,
+            # so calling our API path here would create a duplicate.
+            if SMARTBILL_INVOICING_MODE == "api":
+                try:
+                    issue_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                    asyncio.create_task(_create_and_save_invoice(
+                        user_email=user_email,
+                        plan=plan_tier,
+                        issue_date=issue_date,
+                        interval=interval,
+                        stripe_event_id=event_id,
+                        stripe_session_id=session.get("id"),
+                    ))
+                except Exception as exc:
+                    print(f"[Stripe:{WEBHOOK_VERSION}] SmartBill task scheduling failed: {type(exc).__name__}: {exc}")
+            else:
+                print(f"[Stripe:{WEBHOOK_VERSION}] SMARTBILL_INVOICING_MODE=native — skipping API call, SmartBill native Stripe integration will handle invoicing")
 
         elif event_type == "customer.subscription.deleted":
             session = (event.get("data") or {}).get("object") or {}
@@ -4871,20 +4886,23 @@ async def stripe_webhook(request: Request):
                 except Exception as exc:
                     print(f"[Stripe:{WEBHOOK_VERSION}] Renewal user update failed: {type(exc).__name__}: {exc}")
 
-                # Generate SmartBill invoice for renewal
-                try:
-                    issue_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                    asyncio.create_task(_create_and_save_invoice(
-                        user_email=user_doc.get("email"),
-                        plan=renewal_plan,
-                        issue_date=issue_date,
-                        interval=renewal_interval,
-                        stripe_event_id=event_id,
-                        stripe_session_id=invoice.get("id"),  # invoice id, not session for renewals
-                    ))
-                    print(f"[Stripe:{WEBHOOK_VERSION}] Renewal invoice scheduled for {user_doc.get('email')} ({renewal_plan} {renewal_interval})")
-                except Exception as exc:
-                    print(f"[Stripe:{WEBHOOK_VERSION}] Renewal invoice scheduling failed: {type(exc).__name__}: {exc}")
+                # Generate SmartBill invoice for renewal — same mode-gate as first payment
+                if SMARTBILL_INVOICING_MODE == "api":
+                    try:
+                        issue_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                        asyncio.create_task(_create_and_save_invoice(
+                            user_email=user_doc.get("email"),
+                            plan=renewal_plan,
+                            issue_date=issue_date,
+                            interval=renewal_interval,
+                            stripe_event_id=event_id,
+                            stripe_session_id=invoice.get("id"),  # invoice id, not session for renewals
+                        ))
+                        print(f"[Stripe:{WEBHOOK_VERSION}] Renewal invoice scheduled for {user_doc.get('email')} ({renewal_plan} {renewal_interval})")
+                    except Exception as exc:
+                        print(f"[Stripe:{WEBHOOK_VERSION}] Renewal invoice scheduling failed: {type(exc).__name__}: {exc}")
+                else:
+                    print(f"[Stripe:{WEBHOOK_VERSION}] Renewal payment for {user_doc.get('email')} — SmartBill native integration handles invoicing")
 
         else:
             print(f"[Stripe:{WEBHOOK_VERSION}] Ignoring event type: {event_type}")
