@@ -5106,7 +5106,7 @@ async def privacy_policy():
     <h2>Contact</h2>
     <p>NEDEROV COMEX S.R.L.<br>
     Email: <strong>support@meetings-ro.app</strong><br>
-    Telefon: 0793 693 875<br>
+    Telefon: <strong>+40 734 968 672</strong><br>
     Sediu: București, Sector 4, Str. Ienăchiță Văcărescu nr. 36, ap. 5</p>
 
     <footer>© 2026 NEDEROV COMEX S.R.L. Toate drepturile rezervate. CUI: 46076724.</footer>
@@ -5205,7 +5205,7 @@ async def terms_of_service():
     <h2>Contact</h2>
     <p>NEDEROV COMEX S.R.L.<br>
     Email: <strong>support@meetings-ro.app</strong><br>
-    Telefon: 0793 693 875<br>
+    Telefon: <strong>+40 734 968 672</strong><br>
     Sediu: București, Sector 4, Str. Ienăchiță Văcărescu nr. 36, ap. 5</p>
 
     <footer>© 2026 NEDEROV COMEX S.R.L. Toate drepturile rezervate. CUI: 46076724.</footer>

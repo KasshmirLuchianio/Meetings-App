@@ -13,7 +13,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as Linking from 'expo-linking';
-import { ArrowLeft, ShieldCheck, CreditCard, ExternalLink } from 'lucide-react-native';
+import { ArrowLeft, ShieldCheck, CreditCard, ExternalLink, Mail, Phone } from 'lucide-react-native';
 import { COLORS } from '../src/constants/theme';
 import { API_BASE_URL } from '../src/constants/config';
 import { useAuth } from '../src/context/AuthContext';
@@ -230,6 +230,52 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* CONTACT Section */}
+        <Text style={[styles.sectionTitle, { marginTop: 32 }]}>CONTACT & SUPORT</Text>
+
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            Linking.openURL('mailto:support@meetings-ro.app?subject=Suport%20Meetings.ro');
+          }}
+          style={({ pressed }) => [styles.card, styles.actionRow, pressed && { opacity: 0.7 }]}
+        >
+          <View style={styles.actionIconWrap}>
+            <Mail size={20} color={COLORS.navy} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowLabel}>Email suport</Text>
+            <Text style={styles.rowDescription}>support@meetings-ro.app</Text>
+          </View>
+          <ExternalLink size={18} color="#9CA3AF" />
+        </Pressable>
+
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            Linking.openURL('tel:+40734968672');
+          }}
+          style={({ pressed }) => [
+            styles.card,
+            styles.actionRow,
+            { marginTop: 10 },
+            pressed && { opacity: 0.7 },
+          ]}
+        >
+          <View style={styles.actionIconWrap}>
+            <Phone size={20} color={COLORS.navy} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowLabel}>Telefon</Text>
+            <Text style={styles.rowDescription}>+40 734 968 672</Text>
+          </View>
+          <ExternalLink size={18} color="#9CA3AF" />
+        </Pressable>
+
+        <Text style={styles.contactNote}>
+          Răspundem în 24h în zilele lucrătoare. Pentru urgențe legate de plăți sau cont, sună direct.
+        </Text>
+
         <View style={{ height: insets.bottom + 32 }} />
       </ScrollView>
     </View>
@@ -379,5 +425,13 @@ const styles = StyleSheet.create({
   divider: {
     height: 1,
     backgroundColor: '#F3F4F6',
+  },
+  contactNote: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    lineHeight: 17,
+    marginTop: 12,
+    paddingHorizontal: 4,
+    fontStyle: 'italic',
   },
 });
