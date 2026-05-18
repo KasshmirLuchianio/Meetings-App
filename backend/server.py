@@ -4604,6 +4604,23 @@ async def create_checkout_session(req: CheckoutRequest, user: dict = Depends(get
             customer_email=req.user_email,
             line_items=[{"price": price_id, "quantity": 1}],
             allow_promotion_codes=True,  # enable "Add promotion code" field on Stripe Checkout
+
+            # ---- Stripe Tax + Invoicing (replaces SmartBill flow) ----
+            # automatic_tax: Stripe calculates VAT per customer location (19% RO B2C,
+            #   reverse charge EU B2B with valid VAT ID, zero-rated non-EU).
+            automatic_tax={"enabled": True},
+            # tax_id_collection: shows "I'm purchasing as a business" toggle on Checkout
+            #   so corporate customers can enter CUI/VAT ID for reverse-charge invoicing.
+            tax_id_collection={"enabled": True},
+            # billing_address_collection: required for Stripe Tax to determine VAT jurisdiction.
+            billing_address_collection="required",
+            # customer_update: persists name + billing address + tax_id back to the Customer
+            #   object so subsequent invoices auto-populate with the correct business details.
+            customer_update={
+                "address": "auto",
+                "name": "auto",
+            },
+
             success_url="https://meetings-ro-api.onrender.com/payment-success?session_id={CHECKOUT_SESSION_ID}",
             cancel_url="https://meetings-ro-api.onrender.com/payment-cancel",
         )
