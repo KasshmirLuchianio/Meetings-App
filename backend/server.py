@@ -4605,17 +4605,23 @@ async def create_checkout_session(req: CheckoutRequest, user: dict = Depends(get
             line_items=[{"price": price_id, "quantity": 1}],
             allow_promotion_codes=True,  # enable "Add promotion code" field on Stripe Checkout
 
-            # ---- Stripe Tax + Invoicing (replaces SmartBill flow) ----
-            # automatic_tax: Stripe calculates VAT per customer location (19% RO B2C,
-            #   reverse charge EU B2B with valid VAT ID, zero-rated non-EU).
-            automatic_tax={"enabled": True},
-            # tax_id_collection: shows "I'm purchasing as a business" toggle on Checkout
-            #   so corporate customers can enter CUI/VAT ID for reverse-charge invoicing.
+            # ---- Stripe Invoicing (NEDEROV COMEX is currently NOT VAT-registered) ----
+            # NOTE: We do NOT enable automatic_tax because the company operates below
+            #   the Romanian VAT threshold (300,000 RON/year) and therefore does not
+            #   charge VAT. Invoices are issued at the displayed price with no VAT line.
+            #   When/if revenue crosses the threshold, re-enable automatic_tax={"enabled": True}
+            #   after registering for VAT with ANAF and adding the registration in Stripe Tax.
+            #
+            # tax_id_collection: still useful — corporate customers (firme cu CUI) can
+            #   enter their own CUI which Stripe will include on the issued invoice
+            #   for the customer's accounting purposes. It does NOT affect tax calculation.
             tax_id_collection={"enabled": True},
-            # billing_address_collection: required for Stripe Tax to determine VAT jurisdiction.
+            # billing_address_collection: required to issue properly-formatted invoices
+            #   (Romanian fiscal-code requires customer address on the invoice).
             billing_address_collection="required",
-            # customer_update: persists name + billing address + tax_id back to the Customer
-            #   object so subsequent invoices auto-populate with the correct business details.
+            # customer_update: persists name + billing address + tax_id back to the
+            #   Customer object so subsequent renewal invoices auto-populate with the
+            #   correct business details.
             customer_update={
                 "address": "auto",
                 "name": "auto",
