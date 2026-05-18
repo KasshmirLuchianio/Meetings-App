@@ -2,7 +2,7 @@
   "expo": {
     "name": "Meetings.ro",
     "slug": "meetings-ro",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "scheme": "meetingsro",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -15,7 +15,7 @@
     },
     "ios": {
       "bundleIdentifier": "ro.meetingsapp.meetings",
-      "buildNumber": "3",
+      "buildNumber": "4",
       "supportsTablet": false,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Aplicația necesită acces la microfon pentru a înregistra ședințele.",
@@ -45,7 +45,7 @@
     },
     "android": {
       "package": "ro.meetingsapp.meetings",
-      "versionCode": 4,
+      "versionCode": 5,
       "permissions": [
         "RECORD_AUDIO",
         "INTERNET",
