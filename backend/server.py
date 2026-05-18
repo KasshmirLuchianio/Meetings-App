@@ -4619,13 +4619,12 @@ async def create_checkout_session(req: CheckoutRequest, user: dict = Depends(get
             # billing_address_collection: required to issue properly-formatted invoices
             #   (Romanian fiscal-code requires customer address on the invoice).
             billing_address_collection="required",
-            # customer_update: persists name + billing address + tax_id back to the
-            #   Customer object so subsequent renewal invoices auto-populate with the
-            #   correct business details.
-            customer_update={
-                "address": "auto",
-                "name": "auto",
-            },
+            # NOTE: We intentionally do NOT pass `customer_update` here. Stripe's API rejects
+            #   that parameter when the session creates a NEW customer via `customer_email`
+            #   (error: "`customer_update` can only be used with `customer`"). For new
+            #   customers, Stripe automatically saves the billing address, name, and tax_id
+            #   to the freshly-created Customer object — no manual update needed. The param
+            #   is only valid when reusing an EXISTING customer ID, which we don't do here.
 
             success_url="https://meetings-ro-api.onrender.com/payment-success?session_id={CHECKOUT_SESSION_ID}",
             cancel_url="https://meetings-ro-api.onrender.com/payment-cancel",
