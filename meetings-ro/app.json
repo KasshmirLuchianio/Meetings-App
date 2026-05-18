@@ -2,7 +2,7 @@
   "expo": {
     "name": "Meetings.ro",
     "slug": "meetings-ro",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "scheme": "meetingsro",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -15,7 +15,7 @@
     },
     "ios": {
       "bundleIdentifier": "ro.meetingsapp.meetings",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "supportsTablet": false,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Aplicația necesită acces la microfon pentru a înregistra ședințele.",
@@ -45,12 +45,11 @@
     },
     "android": {
       "package": "ro.meetingsapp.meetings",
-      "versionCode": 3,
+      "versionCode": 4,
       "permissions": [
         "RECORD_AUDIO",
         "INTERNET",
         "VIBRATE",
-        "READ_EXTERNAL_STORAGE",
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
@@ -70,14 +69,6 @@
         "expo-av",
         {
           "microphonePermission": "Aplicația necesită acces la microfon pentru a înregistra ședințele."
-        }
-      ],
-      [
-        "expo-media-library",
-        {
-          "photosPermission": "Aplicația necesită acces pentru a salva fișierele descărcate (PDF / DOCX) pe dispozitiv.",
-          "savePhotosPermission": "Aplicația necesită permisiunea de a salva fișiere pe dispozitiv.",
-          "isAccessMediaLocationEnabled": true
         }
       ],
       "./plugins/withAdiRegistration"

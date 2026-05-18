@@ -6,7 +6,11 @@ import {
 import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import * as MediaLibrary from 'expo-media-library';
+// NOTE: expo-media-library removed (v1.0.2) — Google Play rejected the
+// READ_MEDIA_IMAGES / READ_MEDIA_VIDEO permissions it implicitly declared.
+// We now use only expo-sharing which opens the Android system share sheet
+// where the user can save to Files / Drive / email / WhatsApp / etc.
+// without any special permissions.
 import * as SecureStore from 'expo-secure-store';
 import {
   RefreshCw, Download, FileText, Sparkles, Users,
@@ -248,47 +252,20 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
   };
 
   /**
-   * Save downloaded file to device storage (visible in Files app / gallery).
-   * GDPR-compliant: only saves what the user explicitly downloaded.
+   * Export downloaded file via Android/iOS system share sheet.
+   *
+   * Previously we exposed two paths — "Save to device" (MediaLibrary, required
+   * READ_MEDIA_IMAGES + READ_MEDIA_VIDEO) and "Share". Google Play rejected the
+   * media-library permissions because Meetings.ro doesn't need permanent access
+   * to the user's gallery — it only emits PDF/DOCX/Proces verbal documents the
+   * user just generated.
+   *
+   * The native share sheet covers BOTH use-cases:
+   *   • Save to Files / Drive / Dropbox (file storage targets)
+   *   • Forward via WhatsApp / Email / Telegram (sharing targets)
+   *
+   * Zero special permissions, modern Android UX, GDPR-clean.
    */
-  const saveFileToDevice = async (fileUri: string, filename: string, mimeType: string) => {
-    try {
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert(
-          'Permisiune necesară',
-          'Pentru a salva fișierul pe dispozitiv, trebuie să acorzi permisiunea de acces la galerie.',
-        );
-        return;
-      }
-
-      // Copy to documentDirectory/downloads first (persistent, app-private)
-      const downloadDir = FileSystem.documentDirectory + 'downloads/';
-      await FileSystem.makeDirectoryAsync(downloadDir, { intermediates: true });
-      const localUri = downloadDir + filename;
-      await FileSystem.copyAsync({ from: fileUri, to: localUri });
-
-      // Try to surface in the device Files app via MediaLibrary
-      // (Android: visible in Files; iOS: limited — falls back to share sheet)
-      try {
-        await MediaLibrary.saveToLibraryAsync(localUri);
-      } catch {
-        // Some platforms don't allow non-media files in MediaLibrary —
-        // file is still saved in app's documentDirectory/downloads/
-      }
-
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert(
-        'Descărcat cu succes',
-        `Fișierul "${filename}" a fost salvat pe dispozitiv.`,
-        [{ text: 'OK' }]
-      );
-    } catch (e) {
-      console.error('[Download] save error:', e);
-      Alert.alert('Eroare', 'Nu am putut salva fișierul pe dispozitiv.');
-    }
-  };
-
   const handleExport = async (format: 'pdf' | 'docx' | 'pv') => {
     if (!meeting || !FINAL_STATUSES.slice(0, 2).includes(meeting.status)) {
       Alert.alert('Export indisponibil', 'Disponibil doar pentru intalniri finalizate.');
@@ -314,41 +291,35 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
       });
       if (dl.status !== 200) throw new Error('Download failed');
 
-      // Show options: Save to device OR Share
-      Alert.alert(
-        'Exportă fișierul',
-        `Ce dorești să faci cu "${filename}"?`,
-        [
-          {
-            text: 'Salvează pe dispozitiv',
-            onPress: () => saveFileToDevice(dl.uri, filename, mimeType),
-          },
-          {
-            text: 'Trimite / Partajează',
-            onPress: async () => {
-              try {
-                const isAvailable = await Sharing.isAvailableAsync();
-                if (!isAvailable) {
-                  Alert.alert('Eroare', 'Sharing nu e disponibil pe acest dispozitiv.');
-                  return;
-                }
-                await Sharing.shareAsync(dl.uri, {
-                  mimeType,
-                  dialogTitle: format === 'pv'
-                    ? `Proces-Verbal — ${meeting.title || 'Sedinta'}`
-                    : `${meeting.title || 'Raport'} — ${format.toUpperCase()}`,
-                });
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              } catch {
-                Alert.alert('Eroare', 'Nu am putut partaja fișierul.');
-              }
-            },
-          },
-          { text: 'Anulează', style: 'cancel' },
-        ],
-      );
+      // Open the native share sheet directly. The user picks what to do with
+      // the file — Save to Files / Drive (storage) or Email / WhatsApp /
+      // Telegram (sharing). One action, one tap, no permission prompts.
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (!isAvailable) {
+        Alert.alert(
+          'Indisponibil',
+          'Partajarea fișierelor nu este disponibilă pe acest dispozitiv.',
+        );
+        return;
+      }
+      try {
+        await Sharing.shareAsync(dl.uri, {
+          mimeType,
+          dialogTitle:
+            format === 'pv'
+              ? `Proces verbal — ${meeting.title || 'Ședință'}`
+              : `${meeting.title || 'Raport'} — ${format.toUpperCase()}`,
+          UTI:
+            format === 'pdf'
+              ? 'com.adobe.pdf'
+              : 'org.openxmlformats.wordprocessingml.document',
+        });
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch {
+        // User cancelled the share sheet — silent, no error toast.
+      }
     } catch {
-      Alert.alert('Eroare export', 'Nu am putut exporta fisierul.');
+      Alert.alert('Eroare export', 'Nu am putut exporta fișierul.');
     } finally {
       setExporting(null);
     }
