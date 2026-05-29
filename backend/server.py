@@ -4076,26 +4076,60 @@ async def export_pdf(meeting_id: str, user: dict = Depends(get_current_user)):
     pdf.set_left_margin(15)
     pdf.set_right_margin(15)
 
+    # Effective printable width (page width minus left/right margins).
+    epw = pdf.w - pdf.l_margin - pdf.r_margin
+
+    def _break_long_tokens(text):
+        """Split tokens wider than the printable width so multi_cell can wrap
+        them instead of raising 'Not enough horizontal space...'. Requires the
+        current font to already be set (uses pdf.get_string_width)."""
+        max_width = epw - 1  # small safety margin
+        result = []
+        for word in str(text).split(" "):
+            if not word or pdf.get_string_width(word) <= max_width:
+                result.append(word)
+                continue
+            chunk = ""
+            for ch in word:
+                if pdf.get_string_width(chunk + ch) <= max_width:
+                    chunk += ch
+                else:
+                    if chunk:
+                        result.append(chunk)
+                    chunk = ch
+            if chunk:
+                result.append(chunk)
+        return " ".join(result)
+
+    def _safe(text):
+        return _break_long_tokens(transliterate_ro(str(text)))
+
     def H1(text):
+        pdf.set_x(pdf.l_margin)
         pdf.set_font("Arial", "B", 16)
-        pdf.multi_cell(0, 10, transliterate_ro(str(text)))
+        pdf.multi_cell(epw, 10, _safe(text))
 
     def H2(text):
         pdf.ln(2)
+        pdf.set_x(pdf.l_margin)
         pdf.set_font("Arial", "B", 12)
-        pdf.multi_cell(0, 8, transliterate_ro(str(text)))
+        pdf.multi_cell(epw, 8, _safe(text))
 
     def P(text, bold_label: str = None):
+        pdf.set_x(pdf.l_margin)
         pdf.set_font("Arial", "", 10)
         if bold_label:
             pdf.set_font("Arial", "B", 10)
             pdf.write(6, transliterate_ro(bold_label))
             pdf.set_font("Arial", "", 10)
-        pdf.multi_cell(0, 6, transliterate_ro(str(text)))
+            pdf.multi_cell(0, 6, _safe(text))
+        else:
+            pdf.multi_cell(epw, 6, _safe(text))
 
     def Bullet(text):
+        pdf.set_x(pdf.l_margin)
         pdf.set_font("Arial", "", 10)
-        pdf.multi_cell(0, 6, "- " + transliterate_ro(str(text)))
+        pdf.multi_cell(epw, 6, "- " + _safe(text))
 
     # ---- Header ----
     title = meeting.get("title", "Sedinta") or "Sedinta"
@@ -4148,8 +4182,9 @@ async def export_pdf(meeting_id: str, user: dict = Depends(get_current_user)):
                     line += f"  (Responsabil: {norm['owner']})"
                 if norm["deadline"] != "-":
                     line += f"  [Termen: {norm['deadline']}]"
+                pdf.set_x(pdf.l_margin)
                 pdf.set_font("Arial", "", 10)
-                pdf.multi_cell(0, 6, transliterate_ro(line))
+                pdf.multi_cell(epw, 6, _safe(line))
         else:
             P(str(actions))
 
