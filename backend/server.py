@@ -547,6 +547,14 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         user = await users_col.find_one({"_id": ObjectId(payload["sub"])})
         if not user:
             raise HTTPException(status_code=401, detail="Utilizator inexistent")
+        # Attach pseudonymous user id to the Sentry scope so errors can be traced
+        # to an account. GDPR: id + role only, never email/PII (send_default_pii
+        # stays False). Best-effort — never let observability break the request.
+        try:
+            sentry_sdk.set_user({"id": str(user["_id"])})
+            sentry_sdk.set_tag("user.role", user.get("role", "member"))
+        except Exception:
+            pass
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expirat")
@@ -4063,10 +4071,45 @@ def _get_meeting_section(meeting: dict, *keys, default=None):
     return default
 
 
+def _meeting_has_exportable_content(meeting: dict) -> bool:
+    """True if the meeting has enough substance to build a report.
+
+    Transcript-first: a real recording produces a substantial transcript. For
+    near-silent / empty recordings the transcript is trivial AND the AI tends to
+    fill `concluzii`/`observatii` with an apology ("nu conține informații...") —
+    so those two sections are NOT treated as content signals. Only intentional,
+    structured sections (agenda, decisions, actions, participants) count, which
+    keeps manually-entered meetings (no transcript) exportable.
+    """
+    transcript = (meeting.get("transcript") or "").strip()
+    if len(transcript) >= 40:
+        return True
+    for keys in (
+        ("ordine_de_zi", "subiecte_discutate", "agenda"),
+        ("decizii", "hotarari", "decizii_luate"),
+        ("actiuni_de_urmat", "actions"),
+        ("participanti", "participants"),
+    ):
+        section = _get_meeting_section(meeting, *keys)
+        if isinstance(section, list) and any(str(x).strip() for x in section):
+            return True
+        if isinstance(section, str) and len(section.strip()) >= 20:
+            return True
+    return False
+
+
+_EMPTY_MEETING_MESSAGE = (
+    "Înregistrarea nu conține suficient conținut pentru a genera un raport. "
+    "Reîncearcă cu o înregistrare în care se vorbește clar."
+)
+
+
 @app.get("/api/meetings/{meeting_id}/export/pdf")
 async def export_pdf(meeting_id: str, user: dict = Depends(get_current_user)):
     """Export meeting as PDF — full content from vertical_config + transcript."""
     meeting = await verify_meeting_ownership(meeting_id, user)
+    if not _meeting_has_exportable_content(meeting):
+        raise HTTPException(status_code=422, detail=_EMPTY_MEETING_MESSAGE)
 
     from fpdf import FPDF
 
@@ -4233,6 +4276,8 @@ async def export_pdf(meeting_id: str, user: dict = Depends(get_current_user)):
 async def export_docx(meeting_id: str, user: dict = Depends(get_current_user)):
     """Export meeting as DOCX — full content from vertical_config + transcript."""
     meeting = await verify_meeting_ownership(meeting_id, user)
+    if not _meeting_has_exportable_content(meeting):
+        raise HTTPException(status_code=422, detail=_EMPTY_MEETING_MESSAGE)
 
     from docx import Document
     from docx.shared import Pt
@@ -4374,6 +4419,8 @@ async def export_proces_verbal(meeting_id: str, user: dict = Depends(get_current
     ALWAYS includes the transcript at the bottom even if structured fields are empty.
     """
     meeting = await verify_meeting_ownership(meeting_id, user)
+    if not _meeting_has_exportable_content(meeting):
+        raise HTTPException(status_code=422, detail=_EMPTY_MEETING_MESSAGE)
 
     # Diagnostic log — helps debug missing-content reports
     vc_dbg = meeting.get("vertical_config") or {}
