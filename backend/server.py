@@ -484,9 +484,9 @@ JWT_EXPIRATION_HOURS = 72  # 3 days
 # ("FREE"/"PRO"/"ENTERPRISE") for legacy reasons — normalize_plan() maps them
 # to the lowercase keys used here.
 PLAN_LIMITS = {
-    "starter":    {"minutes": 15,    "label": "15 minute/lună"},
-    "pro":        {"minutes": 300,   "label": "5 ore/lună"},
-    "enterprise": {"minutes": 99999, "label": "Nelimitat"},
+    "starter":    {"minutes": 15,    "label": "15 minute/lună", "max_members": 1},
+    "pro":        {"minutes": 300,   "label": "5 ore/lună",     "max_members": 3},
+    "enterprise": {"minutes": 99999, "label": "Nelimitat",      "max_members": 11},
 }
 
 
@@ -1046,6 +1046,7 @@ async def auth_login(request: Request, req: LoginRequest):
             "email_verified": is_email_verified(user),
             "minutes_used_this_month":  round(used_minutes, 1),
             "minutes_limit_this_month": int(limit_minutes),
+            "max_members":               PLAN_LIMITS[plan_key]["max_members"],
             "created_at": user["created_at"].isoformat() if isinstance(user.get("created_at"), datetime) else str(user.get("created_at", "")),
         }
     }
@@ -1883,6 +1884,38 @@ groq_client = AsyncOpenAI(
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 
+# OpenRouter fallback
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+_original_create = anthropic_client.messages.create if anthropic_client else None
+
+async def _create_with_fallback(**kw):
+    if _original_create:
+        try: return await _original_create(**kw)
+        except Exception as e:
+            if "credit balance is too low" in str(e).lower():
+                print("[Fallback] Claude credits exhausted, trying OpenRouter...")
+            else:
+                print(f"[Fallback] Claude error: {str(e)[:100]}")
+    if OPENROUTER_API_KEY:
+        sys = kw.get("system",""); usr = kw["messages"][0]["content"] if kw.get("messages") else ""; mt = kw.get("max_tokens",4000)
+        for m in ["deepseek/deepseek-chat","google/gemini-2.0-flash-001"]:
+            try:
+                print(f"[Fallback] Trying {m}...")
+                import httpx
+                async with httpx.AsyncClient(timeout=120) as c:
+                    r = await c.post("https://openrouter.ai/api/v1/chat/completions",
+                        headers={"Authorization":"Bearer "+OPENROUTER_API_KEY,"Content-Type":"application/json","HTTP-Referer":"https://meetings.ro"},
+                        json={"model":m,"messages":[{"role":"system","content":sys},{"role":"user","content":usr}],"max_tokens":mt,"temperature":0})
+                    r.raise_for_status(); txt=r.json()["choices"][0]["message"]["content"]
+                    class R: pass
+                    class T: pass
+                    rc=R(); rc.text=txt; tr=T(); tr.content=[rc]
+                    print(f"[Fallback] {m} OK ({len(txt)} chars)")
+                    return tr
+            except Exception as e2: print(f"[Fallback] {m} fail: {str(e2)[:80]}")
+    raise RuntimeError("All AI providers exhausted.")
+if anthropic_client: anthropic_client.messages.create = _create_with_fallback
+
 
 # ==================== AI PROCESSING ====================
 async def transcribe_audio(file_path: str, vertical_type: str = "GENERAL") -> dict:
@@ -2622,18 +2655,30 @@ async def process_meeting(meeting_id: str):
         # Resolve vertical early — needed by transcription + diarization
         vertical_type = meeting.get("vertical_type") or "GENERAL"
 
-        # Preprocess + always-split + parallel transcribe
-        print(f"[Pipeline] Transcribing meeting {meeting_id} (vertical: {vertical_type})...")
-        transcription = await transcribe_with_chunking(audio_path, vertical_type=vertical_type)
+        # Cache: skip transcription if already done (regenerate reuses existing)
+        cached_transcript = meeting.get("transcript")
+        if cached_transcript and meeting.get("segments") and meeting.get("status") in ("done", "processed", "error"):
+            print(f"[Pipeline] Using cached transcript ({len(cached_transcript)} chars) for meeting {meeting_id}")
+            transcription = {
+                "text": cached_transcript,
+                "segments": meeting.get("segments", []),
+                "words": meeting.get("words", []),
+                "chunks_total": meeting.get("processing_chunks_total", 1),
+                "chunks_succeeded": meeting.get("processing_chunks_succeeded", 1),
+            }
+        else:
+            # Preprocess + always-split + parallel transcribe
+            print(f"[Pipeline] Transcribing meeting {meeting_id} (vertical: {vertical_type})...")
+            transcription = await transcribe_with_chunking(audio_path, vertical_type=vertical_type)
 
-        # TASK 3 — Persist chunk processing metadata for production monitoring
-        await meetings_col.update_one(
-            {"_id": ObjectId(meeting_id)},
-            {"$set": {
-                "processing_chunks_total":     transcription.get("chunks_total", 1),
-                "processing_chunks_succeeded": transcription.get("chunks_succeeded", 1),
-            }}
-        )
+            # Persist chunk processing metadata
+            await meetings_col.update_one(
+                {"_id": ObjectId(meeting_id)},
+                {"$set": {
+                    "processing_chunks_total":     transcription.get("chunks_total", 1),
+                    "processing_chunks_succeeded": transcription.get("chunks_succeeded", 1),
+                }}
+            )
 
         # Auto-detect vertical when user left default "GENERAL"
         if vertical_type == "GENERAL" and transcription.get("text"):
@@ -2730,6 +2775,11 @@ async def process_meeting(meeting_id: str):
             {"_id": ObjectId(meeting_id)},
             {"$set": update_data}
         )
+
+        # Notify user that PV is ready
+        await _notify_pv_ready(meeting)
+
+        # Cache transcription: update meeting object for downstream consumers
 
         # ---- Charge minutes against user's plan (status is now "done") ----
         try:
@@ -3024,6 +3074,14 @@ async def invite_member(body: InviteRequest, user: dict = Depends(require_role("
     existing = await users_col.find_one({"email": email, "tenant_id": tenant_id})
     if existing:
         raise HTTPException(status_code=400, detail="Utilizatorul este deja în organizație")
+
+    # Check plan invitation limit
+    admin_plan = normalize_plan(user.get("plan", "FREE"))
+    max_members = PLAN_LIMITS[admin_plan]["max_members"]
+    current = await users_col.count_documents({"tenant_id": tenant_id})
+    pending = await invitations_col.count_documents({"tenant_id": tenant_id, "expires_at": {"$gt": datetime.now(timezone.utc)}})
+    if current + pending >= max_members:
+        raise HTTPException(status_code=400, detail=f"Limită atinsă: {max_members-1} invitații maxime. Upgradează planul.")
 
     # Revoke any old pending invite for same email+tenant
     await invitations_col.delete_many({"email": email, "tenant_id": tenant_id})
@@ -5365,4 +5423,65 @@ async def terms_of_service():
     <footer>© 2026 NEDEROV COMEX S.R.L. Toate drepturile rezervate. CUI: 46076724.</footer>
     </body></html>
     """)
+
+
+# ==================== HEALTH DASHBOARD ====================
+@app.get("/api/admin/stats")
+async def admin_stats(user: dict = Depends(require_role("admin"))):
+    now = datetime.now(timezone.utc); today = now.replace(hour=0,minute=0,second=0,microsecond=0); month = now.replace(day=1,hour=0,minute=0,second=0,microsecond=0)
+    tm = await meetings_col.count_documents({}); tdm = await meetings_col.count_documents({"created_at":{"$gte":today}}); mm = await meetings_col.count_documents({"created_at":{"$gte":month}})
+    dn = await meetings_col.count_documents({"status":{"$in":["done","processed"]}}); er = await meetings_col.count_documents({"status":{"$in":["error","failed"]}}); pr = tm-dn-er
+    tu = await users_col.count_documents({}); mu = await users_col.count_documents({"created_at":{"$gte":month}})
+    pu = await users_col.count_documents({"plan":"PRO"}); eu = await users_col.count_documents({"plan":"ENTERPRISE"})
+    tn = await tenants_col.count_documents({})
+    aok = False
+    if anthropic_client:
+        try: await anthropic_client.messages.create(model="claude-haiku-4-5",max_tokens=1,messages=[{"role":"user","content":"ping"}]); aok = True
+        except: pass
+    return {"timestamp":now.isoformat(),"meetings":{"total":tm,"today":tdm,"this_month":mm,"done":dn,"error":er,"processing":pr},"users":{"total":tu,"this_month":mu,"free":tu-pu-eu,"pro":pu,"enterprise":eu},"tenants":tn,"services":{"anthropic_ok":aok,"groq_ok":groq_client is not None,"openai_ok":openai_client is not None}}
+
+
+# ==================== DEMO (no login) ====================
+@app.post("/api/demo/process")
+async def demo_process():
+    dp = "/app/demo_audio.wav"
+    if not os.path.exists(dp): raise HTTPException(404,"Demo audio missing")
+    t = await transcribe_with_chunking(dp,"GAL"); d = await diarize_transcript(t["segments"],t.get("words",[]),dp,"GAL")
+    from docx import Document; from docx.shared import Pt, Cm; from docx.enum.text import WD_ALIGN_PARAGRAPH
+    doc = Document()
+    for s in doc.sections: s.top_margin=Cm(2); s.bottom_margin=Cm(2)
+    doc.styles["Normal"].font.name="Times New Roman"; doc.styles["Normal"].font.size=Pt(12)
+    p=doc.add_paragraph(); p.alignment=WD_ALIGN_PARAGRAPH.CENTER; r=p.add_run("PROCES-VERBAL DEMO"); r.bold=True; r.font.size=Pt(18)
+    p=doc.add_paragraph(); p.alignment=WD_ALIGN_PARAGRAPH.CENTER; p.add_run("Generat de Meetings.ro — proba gratuita").italic=True
+    doc.add_paragraph(); doc.add_heading("DEZBATERI",level=2)
+    if d:
+        for e in d[:15]: pp=doc.add_paragraph(); rr=pp.add_run(e.get("speaker","Vorbitor")+": "); rr.bold=True; pp.add_run(e.get("text",""))
+    elif t["text"]: doc.add_paragraph(t["text"][:2000])
+    doc.add_paragraph(); p=doc.add_paragraph(); p.alignment=WD_ALIGN_PARAGRAPH.CENTER; p.add_run("Incearca gratuit la meetings-ro.app").bold=True
+    buf=BytesIO(); doc.save(buf); buf.seek(0)
+    return StreamingResponse(buf,media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",headers={"Content-Disposition":"attachment; filename=Demo_ProcesVerbal.docx"})
+
+
+# ==================== NOTIFICARE EMAIL ====================
+async def _notify_pv_ready(meeting:dict):
+    if not meeting.get("user_id"): return
+    u = await users_col.find_one({"_id":ObjectId(meeting["user_id"])})
+    if not u or not u.get("email"): return
+    try:
+        resend.Emails.send({"from":"Meetings.ro <notificari@meetings-ro.app>","to":[u["email"]],"subject":f"PV gata: {meeting.get('title','Sedinta')}","html":'<div style="font-family:Arial;max-width:500px;margin:auto;padding:24px;background:#FAF8F3"><h2 style="color:#1B2A4A">PV gata!</h2><p>Inregistrarea a fost procesata. Deschide aplicatia.</p><a href="https://meetings.ro" style="display:inline-block;padding:12px 24px;background:#1B2A4A;color:white;text-decoration:none;border-radius:6px">Vezi raportul</a></div>'})
+        print(f"[Notify] OK {u['email']}")
+    except Exception as e: print(f"[Notify] fail: {e}")
+
+
+# ==================== LOGO UPLOAD ====================
+@app.post("/api/tenants/me/logo")
+async def upload_tenant_logo(file:UploadFile=File(...),user:dict=Depends(require_role("admin"))):
+    if file.content_type not in ("image/png","image/jpeg"): raise HTTPException(400,"Doar PNG sau JPEG")
+    data=await file.read()
+    if len(data)>2*1048576: raise HTTPException(400,"Max 2MB")
+    t=user.get("tenant_id")
+    if not t: raise HTTPException(404,"Nu ai organizatie")
+    b64=base64.b64encode(data).decode()
+    await tenants_col.update_one({"_id":ObjectId(t)},{"$set":{"stema_url":f"data:{file.content_type};base64,{b64}"}})
+    return {"message":"Logo salvat","bytes":len(data)}
 
