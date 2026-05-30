@@ -4449,11 +4449,32 @@ async def export_proces_verbal(meeting_id: str, user: dict = Depends(get_current
 
     # ---- ANTET (Header) ----
     institution = _get_meeting_section(meeting, "locality", default=None) or user.get("company") or "Instituție"
+
+    # ROMANIA header
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("ROMANIA")
+    run.bold = True
+    run.font.size = Pt(13)
+
+    # Judet (from locality context)
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(f"JUDEȚUL {str(institution).upper()}")
+    run.font.size = Pt(11)
+
+    # Institution name
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run(str(institution).upper())
     run.bold = True
     run.font.size = Pt(14)
+
+    # Separator line
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("─" * 50)
+    run.font.size = Pt(8)
 
     # Titlu
     title_text = meeting.get("title") or "Ședință"
@@ -4479,6 +4500,31 @@ async def export_proces_verbal(meeting_id: str, user: dict = Depends(get_current
     p = doc.add_paragraph()
     p.add_run("Locul desfășurării: ").bold = True
     p.add_run(str(loc))
+
+    # ---- FORMULĂ LEGALĂ (preambul) ----
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run(
+        "Proces-verbal încheiat astăzi, "
+    )
+    p.add_run(_format_date_ro(date_value)).bold = True
+    p.add_run(
+        f", în cadrul ședinței „{title_text}”, "
+        f"desfășurată la sediul din {loc}, "
+        "convocată în conformitate cu prevederile legale în vigoare.\n\n"
+        "Se constată prezența membrilor și participanților, "
+        "în prezența cărora se declară deschise lucrările ședinței."
+    )
+    p.style.font.italic = True
+
+    # ---- OBIECTIV ----
+    obiectiv = _get_meeting_section(meeting, "obiectiv")
+    if obiectiv:
+        doc.add_paragraph()
+        p = doc.add_paragraph()
+        p.add_run("Obiectivul ședinței: ").bold = True
+        p.add_run(str(obiectiv))
 
     # ---- Participanți ----
     participants = _get_meeting_section(meeting, "participanti", "participants")
@@ -4594,14 +4640,18 @@ async def export_proces_verbal(meeting_id: str, user: dict = Depends(get_current
     doc.add_paragraph()
     doc.add_paragraph()
     p = doc.add_paragraph()
-    p.add_run("Drept pentru care am încheiat prezentul proces-verbal.").italic = True
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run("Drept pentru care s-a încheiat prezentul proces-verbal.").italic = True
 
     doc.add_paragraph()
-    table = doc.add_table(rows=2, cols=2)
+    table = doc.add_table(rows=3, cols=2)
+    table.style = 'Table Grid'
     table.rows[0].cells[0].text = "Președinte de ședință"
     table.rows[0].cells[1].text = "Secretar"
-    table.rows[1].cells[0].text = "\n\n_______________________"
-    table.rows[1].cells[1].text = "\n\n_______________________"
+    table.rows[1].cells[0].text = "Numele și prenumele:"
+    table.rows[1].cells[1].text = "Numele și prenumele:"
+    table.rows[2].cells[0].text = "Semnătura:\n\n_______________________"
+    table.rows[2].cells[1].text = "Semnătura:\n\n_______________________"
 
     # Footer
     doc.add_paragraph()

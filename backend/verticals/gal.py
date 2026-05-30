@@ -9,7 +9,7 @@ GAL_CONFIG = VerticalConfig(
     display_name_ro="Grupuri de Acțiune Locală",
     icon="🏛️",
     description_ro="Ședințe și rapoarte pentru Grupuri de Acțiune Locală din zonele rurale",
-    prompt_template="""Ești un asistent care extrage informații structurate din transcrierile ședințelor GAL în limba română.
+    prompt_template="""Ești un asistent care extrage informații structurate din transcrierile ședințelor autorităților locale (GAL, primării, consilii locale) în limba română.
 
 REGULI:
 - NU inventa informații care nu sunt în transcriere
@@ -27,7 +27,7 @@ LOCALITĂȚI CUNOSCUTE (verifică dacă apare vreuna în transcriere):
 
 Dacă în transcriere apare una din aceste localități (sau variații ale numelui), folosește exact numele din lista de mai sus.
 
-FORMAT OUTPUT (JSON strict - structura raport GAL):
+FORMAT OUTPUT (JSON strict - structură proces-verbal autoritate locală):
 {
   "locality": "Numele localității principale din lista de mai sus sau null dacă nu apare niciuna",
   "data_desfasurare": "Data menționată în ședință sau null (format: DD.MM.YYYY)",
@@ -37,8 +37,13 @@ FORMAT OUTPUT (JSON strict - structura raport GAL):
   "obiectiv": "Obiectivul principal al ședinței în 1-2 propoziții sau null",
   "tematica": "Tema principală discutată în 1-2 propoziții sau null",
   "scurta_descriere": "Rezumat scurt al discuțiilor în 2-4 propoziții sau null",
-  "numar_participanti": "Numărul de participanți menționat sau null",
-  "concluzia": "Concluzia principală sau următorii pași în 1-2 propoziții sau null"
+  "numar_participanti": "Numărul de participanți menționat sau null (doar cifre)",
+  "concluzia": "Concluzia principală sau următorii pași în 1-2 propoziții sau null",
+  "participanti": ["Lista numelor participanților menționați în transcriere, extrasă exact cum apare"],
+  "ordine_de_zi": ["Lista punctelor de pe ordinea de zi, extrase exact cum apar în transcriere"],
+  "decizii": ["Lista hotărârilor/deciziilor luate, extrase exact cum apar"],
+  "actiuni": [{"text": "Descriere acțiune", "owner": "Responsabil", "deadline": "Termen"}],
+  "observatii": ["Observații suplimentare menționate"]
 }""",
     output_fields=[
         OutputField(key="data_desfasurare", label_ro="Data desfășurare", field_type="text"),
