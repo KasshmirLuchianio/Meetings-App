@@ -1892,10 +1892,13 @@ async def _create_with_fallback(**kw):
     if _original_create:
         try: return await _original_create(**kw)
         except Exception as e:
-            if "credit balance is too low" in str(e).lower():
+            err = str(e).lower()
+            # ONLY fallback on credit exhaustion — never on other errors
+            if "credit balance is too low" in err:
                 print("[Fallback] Claude credits exhausted, trying OpenRouter...")
             else:
-                print(f"[Fallback] Claude error: {str(e)[:100]}")
+                print(f"[Fallback] Claude error (no fallback): {str(e)[:120]}")
+                raise  # Re-raise — do not fallback for non-credit errors
     if OPENROUTER_API_KEY:
         sys = kw.get("system",""); usr = kw["messages"][0]["content"] if kw.get("messages") else ""; mt = kw.get("max_tokens",4000)
         for m in ["deepseek/deepseek-chat","google/gemini-2.0-flash-001"]:
