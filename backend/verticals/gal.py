@@ -8,8 +8,8 @@ GAL_CONFIG = VerticalConfig(
     name="GAL",
     display_name_ro="Grupuri de Acțiune Locală",
     icon="🏛️",
-    description_ro="Ședințe și rapoarte pentru Grupuri de Acțiune Locală din zonele rurale",
-    prompt_template="""Ești un asistent care extrage informații structurate din transcrierile ședințelor autorităților locale (consilii locale, primării, GAL-uri) în limba română.
+    description_ro="Ședințe și procese-verbale pentru instituții publice sau private (consilii locale, primării, GAL-uri, asociații, firme)",
+    prompt_template="""Ești un asistent care extrage informații structurate din transcrierile ședințelor oficiale în limba română — indiferent de tipul instituției (consiliu local, primărie, GAL, firmă, asociație, cabinet, bancă, spital etc.).
 
 REGULI:
 - NU inventa informații care nu sunt în transcriere
@@ -19,27 +19,26 @@ REGULI:
 - Returnează DOAR JSON valid, fără alt text sau markdown
 - Dacă o informație nu apare în transcriere, folosește null pentru câmpuri simple sau [] pentru liste
 - Pentru nume de persoane, extrage numele complet așa cum apare în transcriere
+- Nu presupune tipul instituției — extrage exact ce se aude în transcriere
 
-FORMAT OUTPUT (JSON strict — structură proces-verbal consiliu local):
+FORMAT OUTPUT (JSON strict):
 {
-  "judet": "Numele județului menționat în ședință (ex: Bacău, Tulcea) sau null",
-  "comuna": "Numele comunei/orașului menționat sau null",
-  "institutia": "Denumirea completă a instituției (ex: CONSILIUL LOCAL AL COMUNEI SASCUT, PRIMĂRIA COMUNEI X) sau null",
-  "tip_sedinta": "Tipul ședinței: 'ordinară' sau 'extraordinară' sau null",
+  "judet": "Numele județului menționat sau null",
+  "localitate": "Numele localității (comună, oraș, municipiu) menționate sau null",
+  "institutia": "Denumirea completă a instituției (ex: PRIMĂRIA COMUNEI X, GAL Y, CONSILIUL LOCAL Z, SC ALFA SRL, CABINET AVOCAT W) sau null",
+  "tip_sedinta": "Tipul ședinței: 'ordinară', 'extraordinară', 'de lucru', 'anuală', 'de bilanț' etc. sau null",
   "data_desfasurare": "Data menționată în ședință sau null (format: DD.MM.YYYY)",
   "format_intalnire": "Tipul întâlnirii: fizică/online/hibrid sau null",
-  "loc_desfasurare": "Locul exact unde s-a desfășurat (ex: Primărie, Cămin Cultural, sediul Consiliului Local) sau null",
+  "loc_desfasurare": "Locul exact unde s-a desfășurat sau null",
   "mod_promovare": "Cum a fost promovată/anunțată întâlnirea sau null",
   "obiectiv": "Obiectivul principal al ședinței în 1-2 propoziții sau null",
   "tematica": "Tema principală discutată în 1-2 propoziții sau null",
   "scurta_descriere": "Rezumat scurt al discuțiilor în 2-4 propoziții sau null",
-  "consilieri_in_functie": "Numărul total de consilieri în funcție (doar cifra) sau null",
-  "consilieri_prezenti": ["Lista consilierilor prezenți, cu nume și funcție dacă sunt menționate (ex: 'Bortun Aurel - viceprimar', 'Popescu Ion')"],
-  "consilieri_absenti": ["Lista consilierilor absenți (doar numele)"],
-  "primar": "Numele complet al primarului sau null",
-  "secretar": "Numele complet al secretarului/common sau null",
-  "administrator_public": "Numele administratorului public sau null",
-  "presedinte_sedinta": "Numele președintelui de ședință sau null",
+  "membri_total": "Numărul total de membri (consilieri, acționari, asociați etc.) sau null (doar cifra)",
+  "membri_prezenti": ["Lista membrilor prezenți, cu nume și funcție/calitate dacă sunt menționate"],
+  "membri_absenti": ["Lista membrilor absenți (doar numele) sau []"],
+  "oficiali": [{"nume": "Numele persoanei", "functie": "Funcția/calitatea (ex: primar, secretar, director, președinte, administrator)"}],
+  "presedinte_sedinta": "Numele persoanei care conduce ședința sau null",
   "numar_participanti": "Numărul total de participanți menționat sau null (doar cifre)",
   "concluzia": "Concluzia principală sau următorii pași în 1-2 propoziții sau null",
   "participanti": ["Lista numelor tuturor participanților menționați în transcriere"],
@@ -62,14 +61,15 @@ FORMAT OUTPUT (JSON strict — structură proces-verbal consiliu local):
     predefined_locations=["Chilia Veche", "Crișan", "C.A.Rosetti", "Maliuc", "Beștepe"],
     color_accent="#1B2A4A",
     whisper_prompt=(
-        "Ședință oficială în limba română. Consiliu local, primărie. "
+        "Ședință oficială în limba română. "
         "Ordinea de zi, proiect de hotărâre, vot pentru, abținere, împotrivă. "
-        "Domnul primar, doamna consilier, secretar general, proces verbal."
+        "Proces verbal, președinte de ședință, secretar, participanți."
     ),
     diarization_context=(
-        "Ședință de consiliu local sau primărie. Protocol formal strict. "
-        "Un președinte conduce, un secretar citește, consilieri intervin scurt. "
-        "Fraze cheie: 'Supun la vot', 'Cine este pentru', 'Declar deschisă ședința'."
+        "Ședință formală. Protocol instituțional. "
+        "Un președinte conduce, un secretar citește, membrii/participanții intervin. "
+        "Fraze cheie: 'Supun la vot', 'Cine este pentru', 'Declar deschisă ședința', "
+        "'Se constată prezența', 'Dau citire ordinii de zi'."
     ),
     expected_speakers=(2, 20),
 )

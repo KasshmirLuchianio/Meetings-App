@@ -4508,30 +4508,26 @@ async def export_proces_verbal(meeting_id: str, user: dict = Depends(get_current
     style.font.name = 'Times New Roman'
     style.font.size = Pt(12)
 
-    # ---- ANTET (Header) - Sascut-style institutional format ----
+    # ---- ANTET (Header) - Institutional format (institution-agnostic) ----
     judet = _get_meeting_section(meeting, "judet", default=None)
-    comuna = _get_meeting_section(meeting, "comuna", default=None)
+    localitate = _get_meeting_section(meeting, "localitate", "comuna", default=None)
     institutia = _get_meeting_section(meeting, "institutia", default=None)
     tip_sedinta = _get_meeting_section(meeting, "tip_sedinta", default=None) or "ordinară"
 
-    # Fallback: build institution name from comuna if institutia not set
-    if not institutia and comuna:
-        institutia = f"CONSILIUL LOCAL AL COMUNEI {comuna.upper()}"
+    # Fallback for institution name
     if not institutia:
         institutia = _get_meeting_section(meeting, "locality", default=None) or user.get("company") or "Instituție"
-    if not judet and comuna:
-        judet = None  # will be handled gracefully in the doc
 
     title_text = meeting.get("title") or "Ședință"
 
-    # ROMANIA
+    # ROMÂNIA
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run("ROMÂNIA")
     run.bold = True
     run.font.size = Pt(13)
 
-    # JUDEȚUL
+    # JUDEȚUL (only if present in transcript)
     if judet:
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -4562,88 +4558,97 @@ async def export_proces_verbal(meeting_id: str, user: dict = Depends(get_current
 
     # ---- DATE ----
     date_value = _get_meeting_section(meeting, "data_desfasurare", "date") or meeting.get("created_at")
-    loc = _get_meeting_section(meeting, "loc_desfasurare", "locality", default=None) or comuna or "sediul instituției"
+    loc = _get_meeting_section(meeting, "loc_desfasurare", "locality", default=None) or localitate or "sediul instituției"
 
-    # ---- PREAMBUL (Intro paragraph) ----
+    # ---- PREAMBUL (Intro paragraph — generic, no assumption about institution type) ----
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     p.add_run("încheiat astăzi ").italic = True
     p.add_run(_format_date_ro(date_value)).bold = True
     p.add_run(f" în ședința {tip_sedinta} a {institutia.title()}, ").italic = True
-    if comuna:
-        p.add_run(f"convocată prin Dispoziția primarului comunei {comuna.title()}, ").italic = True
-    if judet:
-        p.add_run(f"județul {judet.title()}").italic = True
-    p.add_run(".").italic = True
+    p.add_run("convocată în conformitate cu prevederile legale în vigoare.").italic = True
 
     doc.add_paragraph()  # spacer
 
-    # ---- PREZENȚA CONSILIERILOR ----
-    consilieri_in_functie = _get_meeting_section(meeting, "consilieri_in_functie", default=None)
-    consilieri_prezenti = _get_meeting_section(meeting, "consilieri_prezenti", default=None)
-    consilieri_absenti = _get_meeting_section(meeting, "consilieri_absenti", default=None)
+    # ---- PREZENȚA MEMBRILOR (generic — works for consilieri, acționari, asociați, membri AGA etc.) ----
+    membri_total = _get_meeting_section(meeting, "membri_total", "consilieri_in_functie", default=None)
+    membri_prezenti = _get_meeting_section(meeting, "membri_prezenti", "consilieri_prezenti", default=None)
+    membri_absenti = _get_meeting_section(meeting, "membri_absenti", "consilieri_absenti", default=None)
 
-    if consilieri_in_functie and isinstance(consilieri_prezenti, list) and consilieri_prezenti:
-        nr_prezenti = len(consilieri_prezenti)
+    if membri_total and isinstance(membri_prezenti, list) and membri_prezenti:
+        nr_prezenti = len(membri_prezenti)
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p.add_run(
-            f"Consultând condica de prezență a consilierilor locali, reiese că, "
-            f"din {consilieri_in_functie} consilieri în funcție, la ședința {tip_sedinta} "
+            f"Consultând condica de prezență, reiese că, "
+            f"din {membri_total} membri, la ședința {tip_sedinta} "
             f"de astăzi {_format_date_ro(date_value)} participă un nr. de {nr_prezenti} "
-            f"consilieri: "
+            f"membri: "
         )
-        p.add_run(", ".join(str(c) for c in consilieri_prezenti))
-        if isinstance(consilieri_absenti, list) and consilieri_absenti:
-            p.add_run(f"; absent: {', '.join(str(a) for a in consilieri_absenti)}")
+        p.add_run(", ".join(str(c) for c in membri_prezenti))
+        if isinstance(membri_absenti, list) and membri_absenti:
+            p.add_run(f"; absent: {', '.join(str(a) for a in membri_absenti)}")
         p.add_run(".")
 
         doc.add_paragraph()  # spacer
 
-    # ---- OFICIALI PREZENȚI ----
-    primar = _get_meeting_section(meeting, "primar", default=None)
-    secretar = _get_meeting_section(meeting, "secretar", default=None)
-    administrator_public = _get_meeting_section(meeting, "administrator_public", default=None)
+    # ---- OFICIALI / PARTICIPANȚI CU FUNCȚII (generic, driven by AI extraction) ----
+    oficiali = _get_meeting_section(meeting, "oficiali", default=None)
     presedinte_sedinta = _get_meeting_section(meeting, "presedinte_sedinta", default=None)
 
-    has_officials = any([primar, secretar, administrator_public])
-    if has_officials:
+    # Also try legacy fields for backward compatibility
+    if not oficiali:
+        primar_legacy = _get_meeting_section(meeting, "primar", default=None)
+        secretar_legacy = _get_meeting_section(meeting, "secretar", default=None)
+        admin_legacy = _get_meeting_section(meeting, "administrator_public", default=None)
+        if any([primar_legacy, secretar_legacy, admin_legacy]):
+            oficiali = []
+            if primar_legacy:
+                oficiali.append({"nume": primar_legacy, "functie": "primar"})
+            if secretar_legacy:
+                oficiali.append({"nume": secretar_legacy, "functie": "secretar"})
+            if admin_legacy:
+                oficiali.append({"nume": admin_legacy, "functie": "administrator public"})
+
+    if oficiali and isinstance(oficiali, list) and oficiali:
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p.add_run("La ședință participă ")
 
         parts = []
-        if primar:
-            parts.append(f"dl. primar {primar}")
-        if secretar:
-            parts.append(f"d-na/d-l {secretar} – în calitate de secretar al comunei")
-        if administrator_public:
-            parts.append(f"dl. {administrator_public} – administrator public")
+        for o in oficiali:
+            if isinstance(o, dict):
+                nume = o.get("nume") or o.get("name") or ""
+                functie = o.get("functie") or o.get("rol") or o.get("role") or ""
+                if nume and functie:
+                    parts.append(f"dl./d-na {nume} – {functie}")
+                elif nume:
+                    parts.append(f"dl./d-na {nume}")
+            elif isinstance(o, str):
+                parts.append(o)
 
         p.add_run(", ".join(parts))
         p.add_run(".")
         doc.add_paragraph()  # spacer
 
-    # ---- DESCHIDEREA ȘEDINȚEI (Art. 40 Legea 215/2001) ----
+    # ---- DESCHIDEREA ȘEDINȚEI (generic) ----
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     p.add_run(
-        "În conformitate cu prevederile art. 40 (1) din Legea 215/2001, republicată, "
-        "se constată prezența majorității consilierilor în funcție la ședință, "
-        "drept pentru care, secretarul comunei declară deschise lucrările ședinței "
-        f"de Consiliu Local de astăzi {_format_date_ro(date_value)}."
+        f"Se constată prezența majorității membrilor, "
+        f"drept pentru care se declară deschise lucrările ședinței "
+        f"de astăzi {_format_date_ro(date_value)}."
     )
 
     doc.add_paragraph()  # spacer
 
-    # ---- PREDAREA CONDUCERII (if president is named) ----
-    if presedinte_sedinta and secretar:
+    # ---- PREDAREA CONDUCERII (only if president is named) ----
+    if presedinte_sedinta:
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p.add_run(
-            f"D-nul/D-na secretar declară deschisă ședința Consiliului Local "
-            f"de astăzi {_format_date_ro(date_value)} și predă conducerea lucrărilor "
-            f"ședinței d-lui/d-nei {presedinte_sedinta} – președinte de ședință."
+            f"Se predă conducerea lucrărilor ședinței "
+            f"dl-ui/d-nei {presedinte_sedinta} – președinte de ședință."
         )
         doc.add_paragraph()  # spacer
 
