@@ -5442,27 +5442,6 @@ async def admin_stats(user: dict = Depends(require_role("admin"))):
     return {"timestamp":now.isoformat(),"meetings":{"total":tm,"today":tdm,"this_month":mm,"done":dn,"error":er,"processing":pr},"users":{"total":tu,"this_month":mu,"free":tu-pu-eu,"pro":pu,"enterprise":eu},"tenants":tn,"services":{"anthropic_ok":aok,"groq_ok":groq_client is not None,"openai_ok":openai_client is not None}}
 
 
-# ==================== DEMO (no login) ====================
-@app.post("/api/demo/process")
-async def demo_process():
-    dp = "/app/demo_audio.wav"
-    if not os.path.exists(dp): raise HTTPException(404,"Demo audio missing")
-    t = await transcribe_with_chunking(dp,"GAL"); d = await diarize_transcript(t["segments"],t.get("words",[]),dp,"GAL")
-    from docx import Document; from docx.shared import Pt, Cm; from docx.enum.text import WD_ALIGN_PARAGRAPH
-    doc = Document()
-    for s in doc.sections: s.top_margin=Cm(2); s.bottom_margin=Cm(2)
-    doc.styles["Normal"].font.name="Times New Roman"; doc.styles["Normal"].font.size=Pt(12)
-    p=doc.add_paragraph(); p.alignment=WD_ALIGN_PARAGRAPH.CENTER; r=p.add_run("PROCES-VERBAL DEMO"); r.bold=True; r.font.size=Pt(18)
-    p=doc.add_paragraph(); p.alignment=WD_ALIGN_PARAGRAPH.CENTER; p.add_run("Generat de Meetings.ro — proba gratuita").italic=True
-    doc.add_paragraph(); doc.add_heading("DEZBATERI",level=2)
-    if d:
-        for e in d[:15]: pp=doc.add_paragraph(); rr=pp.add_run(e.get("speaker","Vorbitor")+": "); rr.bold=True; pp.add_run(e.get("text",""))
-    elif t["text"]: doc.add_paragraph(t["text"][:2000])
-    doc.add_paragraph(); p=doc.add_paragraph(); p.alignment=WD_ALIGN_PARAGRAPH.CENTER; p.add_run("Incearca gratuit la meetings-ro.app").bold=True
-    buf=BytesIO(); doc.save(buf); buf.seek(0)
-    return StreamingResponse(buf,media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",headers={"Content-Disposition":"attachment; filename=Demo_ProcesVerbal.docx"})
-
-
 # ==================== NOTIFICARE EMAIL ====================
 async def _notify_pv_ready(meeting:dict):
     if not meeting.get("user_id"): return
