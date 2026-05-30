@@ -1,0 +1,34 @@
+# WhatsApp Outreach — Meetings.ro
+# Trimite direct catre primari/directori GAL
+
+BUNĂ ZIUA — varianta scurtă:
+
+"""
+Bună ziua, domnule director.
+
+Mă numesc Vlad Grigorov și am creat Meetings.ro — o aplicație care generează automat procese-verbale conform OUG 54/2019. 
+
+Practic: înregistrați ședința, AI-ul transcrie și scoate PV-ul gata de semnare. 15 ore pe lună economisite.
+
+Aplicația e gratuită pe Google Play: 
+https://play.google.com/store/apps/details?id=com.yourcompany.meetingsro
+
+Vă las și site-ul: https://meetings.ro
+
+Dacă vreți să discutăm, răspund aici. O zi bună!
+"""
+
+URMĂRIRE — după 5 zile fără răspuns:
+
+"""
+Bună ziua,
+
+V-am scris acum câteva zile despre Meetings.ro — soluția automată pentru procese-verbale conform OUG 54/2019.
+
+Dacă ați avut timp să vă uitați pe aplicație, aș fi curios să știu ce părere aveți. 
+
+Dacă nu, nicio problemă — vă las link-ul din nou:
+https://play.google.com/store/apps/details?id=com.yourcompany.meetingsro
+
+O zi bună!
+"""
