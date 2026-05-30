@@ -5434,10 +5434,8 @@ async def admin_stats(user: dict = Depends(require_role("admin"))):
     tu = await users_col.count_documents({}); mu = await users_col.count_documents({"created_at":{"$gte":month}})
     pu = await users_col.count_documents({"plan":"PRO"}); eu = await users_col.count_documents({"plan":"ENTERPRISE"})
     tn = await tenants_col.count_documents({})
-    aok = False
-    if anthropic_client:
-        try: await anthropic_client.messages.create(model="claude-haiku-4-5",max_tokens=1,messages=[{"role":"user","content":"ping"}]); aok = True
-        except: pass
+    aok = False  # Cached — do NOT ping AI on every stats call (costs money)
+    # Note: Anthropic status is checked passively when actual AI calls succeed/fail
     return {"timestamp":now.isoformat(),"meetings":{"total":tm,"today":tdm,"this_month":mm,"done":dn,"error":er,"processing":pr},"users":{"total":tu,"this_month":mu,"free":tu-pu-eu,"pro":pu,"enterprise":eu},"tenants":tn,"services":{"anthropic_ok":aok,"groq_ok":groq_client is not None,"openai_ok":openai_client is not None}}
 
 
