@@ -1630,10 +1630,12 @@ SARCINA: Identifică cu precizie maximă fiecare schimbare de vorbitor și atrib
    - Cei care intervin scurt cu "sunt de acord", "propun", "amendament" → Consilieri
    - Cel care consemnează ("Am înregistrat", "Se consemnează") → Secretar general
 
-4. CONSISTENȚĂ (regula de aur):
-   - Dacă ai identificat că Vorbitor 1 e primarul → ORICE frază de vot sau deschidere ulterioară = același Vorbitor 1
-   - Nu schimba speaker dacă e aceeași persoană care continuă după o pauză scurtă (<3 secunde)
-   - Dacă două segmente consecutive au același pattern de vorbire și nu există semnal de schimbare → același vorbitor
+4. CONSISTENȚĂ (regula de aur — prioritate maximă):
+   - Dacă ai identificat că Vorbitor 1 e primarul/președintele → ORICE frază de vot sau deschidere ulterioară = același Vorbitor 1. NU schimba niciodată speaker-ul care conduce ședința.
+   - PĂSTREAZĂ SPEAKER-UL CURENT când: conținutul continuă aceeași idee, nu există formule explicite de tranziție (\"mulțumesc\", \"cuvântul\", \"dacă îmi permiteți\", \"solicit cuvântul\"), nu e menționat alt nume explicit. O pauză în transcriere NU este o schimbare de vorbitor.
+   - NU atribui segmente unui vorbitor nou DOAR pentru că există un gap de timp între segmente. Regula default: același vorbitor continuă, dacă nu există semnal explicit de schimbare.
+   - Dacă două segmente consecutive au același pattern de vorbire, vocabular, topic și stil → același vorbitor, INDIFERENT de gap-ul dintre timestamp-uri.
+   - În ședințele formale, președintele/primarul vorbește ~60-70% din timp. Așteaptă-te la intervenții lungi ale aceleiași persoane, nu fragmenta artificial.
 
 5. CÂND NU ȘTII:
    - Folosește Vorbitor N (număr incremental)

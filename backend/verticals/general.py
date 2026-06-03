@@ -14,8 +14,12 @@ GENERAL_CONFIG = VerticalConfig(
     color_accent="#1B2A4A",
     whisper_prompt=(
         "Înregistrare audio în limba română. "
-        "Vorbire naturală, conversație, lectură sau monolog. "
-        "Orice context personal sau profesional."
+        "Vocabular: ședință, consiliu, primărie, primar, consilier, secretar, "
+        "discuție, întâlnire, proiect, plan, strategie, buget, raport, evaluare, "
+        "aprobare, termen, deadline, responsabil, echipă, departament, "
+        "client, partener, contract, ofertă, propunere, decizie, acțiune, "
+        "proces-verbal, hotărâre, ordine de zi, vot, abținere, împotrivă. "
+        "Vorbire naturală sau formală. Transcriere fidelă."
     ),
     diarization_context=(
         "Înregistrare generală. Poate fi: o singură persoană care citește sau vorbește, "

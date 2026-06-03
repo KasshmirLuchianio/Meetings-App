@@ -62,14 +62,26 @@ FORMAT OUTPUT (JSON strict):
     color_accent="#1B2A4A",
     whisper_prompt=(
         "Ședință oficială în limba română. "
-        "Ordinea de zi, proiect de hotărâre, vot pentru, abținere, împotrivă. "
-        "Proces verbal, președinte de ședință, secretar, participanți."
+        "Vocabular instituțional: ședință ordinară, extraordinară, consiliu local, "
+        "primărie, primar, viceprimar, secretar general, consilier, consiliul județean, "
+        "președinte de ședință, ordine de zi, proces-verbal, hotărâre, proiect de hotărâre, "
+        "amendament, vot, voturi pentru, împotrivă, abținere, abțineri, "
+        "aviz, comisie, comitet, cvorum, deliberare, dezbatere, "
+        "aprobare, respingere, unanimitate, majoritate, validare. "
+        "Fraze: declar deschisă ședința, se constată prezența, "
+        "supun la vot, dau citire ordinii de zi, se aprobă, se respinge, "
+        "procesul verbal al ședinței, încheierea ședinței, grup de acțiune locală."
     ),
     diarization_context=(
         "Ședință formală. Protocol instituțional. "
-        "Un președinte conduce, un secretar citește, membrii/participanții intervin. "
-        "Fraze cheie: 'Supun la vot', 'Cine este pentru', 'Declar deschisă ședința', "
-        "'Se constată prezența', 'Dau citire ordinii de zi'."
+        "Un președinte/primar conduce ~60% din timp — revine constant, "
+        "NU crea vorbitori noi pentru aceeași persoană. "
+        "Un secretar citește documente. Membrii/consilierii intervin punctual. "
+        "Fraze cheie: 'Supun la vot', 'Cine este pentru', "
+        "'Declar deschisă ședința', 'Se constată prezența', "
+        "'Dau citire ordinii de zi'. "
+        "ATENȚIE: Gap-urile între segmente NU înseamnă schimbare de vorbitor. "
+        "Președintele vorbește, face o pauză, apoi continuă — rămâne același speaker."
     ),
     expected_speakers=(2, 20),
 )
