@@ -3842,20 +3842,73 @@ async def correct_and_reprocess(meeting_id: str):
         if not meeting or not meeting.get("transcript"):
             return
 
+        # Build context for smarter correction
+        vertical_type = meeting.get("vertical_type") or "GENERAL"
+        diarized = meeting.get("diarized_transcript") or []
+        speaker_names = list(set(
+            d.get("speaker", "") for d in diarized
+            if d.get("speaker") and "Vorbitor" not in str(d.get("speaker", ""))
+        ))[:10]
+
+        speaker_hint = ""
+        if speaker_names:
+            speaker_hint = (
+                f"\nVorbitori identificați în ședință: {', '.join(speaker_names)}. "
+                f"Asigură-te că numele lor sunt scrise corect."
+            )
+
+        # Use diarized transcript for better context, fall back to raw transcript
+        source_text = meeting["transcript"]
+        if diarized:
+            diarized_text = "\n".join(
+                f"{d.get('speaker', '?')} [{d.get('timestamp', '00:00')}]: {d.get('text', '')}"
+                for d in diarized if d.get("text", "").strip()
+            )
+            if len(diarized_text) > len(source_text) * 1.5:
+                source_text = diarized_text  # richer context for correction
+
         # Step 1: Correct transcript with Claude
         response = await anthropic_client.messages.create(
             model="claude-sonnet-4-5",
             max_tokens=8000,
             system=(
-                "Ești un editor profesionist de transcrieri în limba română. "
-                "Corectează erorile gramaticale, de ortografie și de transcriere. "
-                "Păstrează sensul original și structura textului. "
-                "NU adăuga, nu șterge și nu reformula conținutul — doar corectează greșelile. "
-                "Returnează DOAR textul corectat, fără explicații."
+                "Ești un expert în corectarea transcrierilor audio în limba română, "
+                "specializat pe ședințe instituționale (consilii locale, primării, tribunale, GAL-uri).\n\n"
+
+                "CONTEXT: Aceasta este o transcriere automată (Whisper) dintr-o ședință reală. "
+                "Whisper face frecvent aceste greșeli în română pe care TU trebuie să le corectezi:\n\n"
+
+                "1. DIACRITICE: Adaugă ă, â, î, ș, ț unde lipsesc. "
+                "Exemplu: 'sedinta' → 'ședința', 'Romania' → 'România', 'primaria' → 'primăria'\n\n"
+
+                "2. GRAMATICĂ: Corectează acordurile greșite (gen, număr, caz). "
+                "Exemplu: 'consiliul local al comunei' nu 'consiliul local a comunei'\n\n"
+
+                "3. CUVINTE TĂIATE/TOPITE: Whisper uneori lipește cuvinte sau taie silabe. "
+                "Refă cuvintele evident incomplete din context. "
+                "Exemplu: 'procesul ver' → 'procesul verbal', 'hotărâ' → 'hotărârea'\n\n"
+
+                "4. TERMENI INSTITUȚIONALI: Corectează termenii specifici administrației. "
+                "Exemplu: 'concilier' → 'consilier', 'primaru' → 'primarul', "
+                "'ordinea de zi' → 'ordinea de zi', 'proces verbal' → 'proces-verbal'\n\n"
+
+                "5. NUME PROPRII: Dacă sunt nume de persoane sau localități, scrie-le corect "
+                "(ex: 'Ion Popescu' nu 'ion popescu', 'București' nu 'bucuresti')\n\n"
+
+                "6. PĂSTREAZĂ: Sensul, structura și tonul original. "
+                "Nu inventa conținut care nu există în audio. "
+                "Nu șterge paragrafe întregi.\n\n"
+
+                "IMPORTANT: Fii curajos în a corecta — o transcriere neschimbată "
+                "e mai rea decât una cu corecții rezonabile. "
+                "Returnează DOAR textul corectat, fără explicații, fără marcaje."
             ),
             messages=[{
                 "role": "user",
-                "content": f"Corectează următoarea transcriere:\n\n{meeting['transcript']}"
+                "content": (
+                    f"Corectează următoarea transcriere dintr-o ședință "
+                    f"(tip: {vertical_type}).{speaker_hint}\n\n{source_text}"
+                )
             }]
         )
 
