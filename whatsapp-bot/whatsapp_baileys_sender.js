@@ -8,8 +8,9 @@
  * introdu codul. Sesiunea se salvează, data viitoare merge direct.
  *
  * Usage:
- *   node whatsapp_baileys_sender.js dry-run   — vezi contactele, fără trimitere
- *   node whatsapp_baileys_sender.js live      — trimite mesaje reale
+ *   node whatsapp_baileys_sender.js test +40793693875  — trimite test la un singur numar
+ *   node whatsapp_baileys_sender.js dry-run              — vezi contactele, fara trimitere
+ *   node whatsapp_baileys_sender.js live                 — trimite la toate contactele
  */
 
 const { makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, delay } = require('@whiskeysockets/baileys');
@@ -124,6 +125,38 @@ async function main() {
   }
 
   let sent = 0, failed = 0;
+
+  // ── TEST mode: send to a single number ─────────────────
+  if (process.argv.includes('test')) {
+    const testPhone = process.argv[process.argv.indexOf('test') + 1] || null;
+    if (!testPhone) {
+      console.log('❌ Folosire: node whatsapp_baileys_sender.js test +40793693875');
+      process.exit(1);
+    }
+    let phone = testPhone.replace(/[\s\-]/g, '');
+    if (!phone.startsWith('+')) {
+      if (phone.startsWith('00')) phone = '+' + phone.slice(2);
+      else if (phone.startsWith('0')) phone = '+4' + phone;
+    }
+    const waId = phone.replace(/\+/g, '') + '@s.whatsapp.net';
+    console.log(`\n📱 TEST: trimit mesaj la ${phone}...\n`);
+
+    if (DRY_RUN && !process.argv.includes('test')) {
+      // dry-run without test: show contacts
+    }
+
+    try {
+      await sock.sendMessage(waId, { text: MESAJ });
+      console.log(`✅ Mesaj trimis cu succes la ${phone}!\n`);
+      sent++;
+    } catch (e) {
+      console.log(`❌ Eșuat: ${e.message?.slice(0, 100)}\n`);
+      failed++;
+    }
+    process.exit(0);
+  }
+
+  // ── BATCH mode: send to all contacts ───────────────────
   const errors = [];
 
   for (let i = 0; i < contacts.length; i++) {
