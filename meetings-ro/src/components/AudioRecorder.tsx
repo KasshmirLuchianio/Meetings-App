@@ -25,6 +25,7 @@ export default function AudioRecorder({ onRecordingComplete }: RecorderProps) {
   const {
     isRecording,
     setIsRecording,
+    setIsProcessing,
     setDuration,
     setDurationSeconds,
     registerStopHandler,
@@ -57,12 +58,15 @@ export default function AudioRecorder({ onRecordingComplete }: RecorderProps) {
         timerRef.current = null;
       }
 
-      setIsRecording(false);
+      // Show processing screen IMMEDIATELY — don't let user see homepage
+      setIsProcessing(true);
 
       await rec.stopAndUnloadAsync();
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
       });
+
+      setIsRecording(false);
 
       const uri = rec.getURI();
 
@@ -97,9 +101,11 @@ export default function AudioRecorder({ onRecordingComplete }: RecorderProps) {
       setDurationSeconds(0);
     } catch (error) {
       console.error('Failed to stop recording:', error);
+      setIsProcessing(false);
+      setIsRecording(false);
       alert('Eroare la oprirea înregistrării');
     }
-  }, [onRecordingComplete, setIsRecording, setDuration, setDurationSeconds]);
+  }, [onRecordingComplete, setIsRecording, setIsProcessing, setDuration, setDurationSeconds]);
 
   // Register stop handler so RecordingScreen can call it
   useEffect(() => {

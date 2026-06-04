@@ -11,12 +11,14 @@ import { Mic, Upload, Crown, AlertTriangle } from 'lucide-react-native';
 import { COLORS } from '../src/constants/theme';
 import { API_BASE_URL, PRICING_PLANS } from '../src/constants/config';
 import { useAuth } from '../src/context/AuthContext';
+import { useRecording } from '../src/context/RecordingContext';
 import { authenticatedFetch } from '../src/utils/authenticatedFetch';
 
 
 export default function HomeScreen() {
   const router = useRouter();
   const { isAuthenticated, isLoading, user, token, refreshUsage } = useAuth();
+  const { setIsProcessing } = useRecording();
   const [activeTab, setActiveTab] = useState<'record' | 'upload'>('record');
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [limitMessage, setLimitMessage] = useState('');
@@ -119,6 +121,7 @@ export default function HomeScreen() {
         if (detail?.error === 'plan_limit_reached') {
           setLimitMessage(detail.message || 'Ai atins limita de minute disponibile.');
           setShowLimitModal(true);
+          setIsProcessing(false);
           return;
         }
       }
@@ -129,6 +132,7 @@ export default function HomeScreen() {
       await refreshUsage();
       router.push(`/meeting/${meeting._id}`);
     } catch (err: any) {
+      setIsProcessing(false);
       alert(err.message || 'Eroare la încărcarea înregistrării');
     }
   };

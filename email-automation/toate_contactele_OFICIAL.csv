@@ -1,0 +1,92 @@
+Nume,Email,Judet,Telefon,Tip
+"Covasna",office@kvmt.ro,Covasna,,Consiliu Judetean
+"Ilfov",cjilfov@cjilfov.ro,Ilfov,,Consiliu Judetean
+"Prahova",cons_jud@cjph.ro,Prahova,,Consiliu Judetean
+"Bihor",registratura@cjbihor.ro,Bihor,,Consiliu Judetean
+"Teleorman",cjt@cjteleorman.ro,Teleorman,,Consiliu Judetean
+"Cluj-Napoca",cjc@cjcluj.ro,Cluj-Napoca,,Consiliu Judetean
+"Suceava",contact@cjsuceava.ro,Suceava,,Consiliu Judetean
+"Neamț",cons.judetean@cjneamt.ro,Neamț,,Consiliu Judetean
+"Olt",cjolt@cjolt.ro,Olt,,Consiliu Judetean
+"Călărași",cjcalarasi@calarasi.ro,Călărași,,Consiliu Judetean
+"Brăila",consiliu@cjbraila.ro,Brăila,,Consiliu Judetean
+"Vaslui",consiliu@cjvs.eu,Vaslui,,Consiliu Judetean
+"Salaj",office@cjsaj.ro,Salaj,,Consiliu Judetean
+"Giurgiu",cjg@cjgiurgiu.ro,Giurgiu,,Consiliu Judetean
+"Gorj",consjud@cjgorj.ro,Gorj,,Consiliu Judetean
+"Brașov",relatii.publice.cj@judbrasov.ro,Brașov,,Consiliu Judetean
+"Vâlcea",consiliu@cjvalcea.ro,Vâlcea,,Consiliu Judetean
+"Iași",ghiseu.unic@icc.ro,Iași,,Consiliu Judetean
+"Argeș",ionelvoica@yahoo.com,Argeș,,Consiliu Judetean
+"Galați",conducere@cjgalati.ro,Galați,,Consiliu Judetean
+"Buzău",cjbuzau@cjbuzau.ro,Buzău,,Consiliu Judetean
+"Constanța",consjud@cjc.ro,Constanța,,Consiliu Judetean
+"Ialomița",cji@cicnet.ro,Ialomița,,Consiliu Judetean
+"Mehedinți",public@cjmehedinti.ro,Mehedinți,,Consiliu Judetean
+"Tulcea",office@cjtulcea.ro,Tulcea,,Consiliu Judetean
+"Sibiu",judet@cjsibiu.ro,Sibiu,,Consiliu Judetean
+"Timiș",cjt@cjtimis.ro,Timiș,,Consiliu Judetean
+"Arad",consiliul@cjarad.ro,Arad,,Consiliu Judetean
+"Hunedoara",cjh@cjhunedoara.ro,Hunedoara,,Consiliu Judetean
+"Maramureș",office@maramures.ro,Maramureș,,Consiliu Judetean
+"Caraș-Severin",cjcs@cjcs.ro,Caraș-Severin,,Consiliu Judetean
+"Bistrita Năsăud",cjbn@cjbn.ro,Bistrita Năsăud,,Consiliu Judetean
+"Satu Mare",office@cjsm.ro,Satu Mare,,Consiliu Judetean
+"Dolj",contact@cjdolj.ro,Dolj,,Consiliu Judetean
+"Dâmbovița",consjdb@cjd.ro,Dâmbovița,,Consiliu Judetean
+"Harghita",info@judetulharghita.ro,Harghita,,Consiliu Judetean
+"Vrancea",contact@cjvrancea.ro,Vrancea,,Consiliu Judetean
+"Bacău",presedinte@csjbacau.ro,Bacău,,Consiliu Judetean
+"Botoșani",consiliu@cjbotosani.ro,Botoșani,,Consiliu Judetean
+"Alba",cjalba@cjalba.ro,Alba,,Consiliu Judetean
+"Mureș",cjmures@cjmures.ro,Mureș,,Consiliu Judetean
+"GAL (din PDF)",galcodrumoma@gmail.com,,,GAL
+"GAL (din PDF)",galvaleatrotusuluibacau@gmail.com,,,GAL
+"GAL (din PDF)",galcetateatamasidava@gmail.com,,,GAL
+"GAL (din PDF)",galluncamuresuluidejos@yahoo.ro,,,GAL
+"GAL (din PDF)",secretariat@galmaramuresvest.ro,,,GAL
+"GAL (din PDF)",galconfluentemoldave@gmail.com,,,GAL
+"GAL (din PDF)",galmunteleses@yahoo.com,,,GAL
+"GAL (din PDF)",gal.horezu@gmail.com,,,GAL
+"Maramureș",prefect@prefecturamaramureş.ro,Maramureș,,Prefectura
+"Timiș",contact@prefecturatimis.ro,Timiș,,Prefectura
+"Tulcea",directorcabinet@prefecturatulcea.ro,Tulcea,,Prefectura
+"Harghita",office@prefecturahr.ro,Harghita,,Prefectura
+"Salaj",psj@prefecturasalaj.ro,Salaj,,Prefectura
+"Covasna",cabinetulprefectului@prefecturacv.ro,Covasna,,Prefectura
+"Gorj",prefect@prefecturagorj.ro,Gorj,,Prefectura
+"Iași",contact@prefecturaiasi.ro,Iași,,Prefectura
+"Buzău",prefect@prefecturabuzau.ro,Buzău,,Prefectura
+"Bistrita Năsăud",inform_publice@prefecturabn.ro,Bistrita Năsăud,,Prefectura
+"București",cancelarie.prefect.ipb@mai.gov.ro,București,,Prefectura
+"Bacău",secretariat@prefecturabacau.ro,Bacău,,Prefectura
+"Hunedoara",cancelarie@prefecturahunedoara.ro,Hunedoara,,Prefectura
+"Mehedinți",prefect@prefecturamehedinti.ro,Mehedinți,,Prefectura
+"Galați",prefect@prefecturagalati.ro,Galați,,Prefectura
+"Bihor",registratura@prefecturabihor.ro,Bihor,,Prefectura
+"Constanța",cancelarie@prefecturaconstanta.ro,Constanța,,Prefectura
+"Vâlcea",prefect@prefecturavalcea.ro,Vâlcea,,Prefectura
+"Teleorman",office@prefectura-teleorman.ro,Teleorman,,Prefectura
+"Arad",pja@prefecturaarad.ro,Arad,,Prefectura
+"Suceava",prefsv@prefecturasuceava.ro,Suceava,,Prefectura
+"Neamț",office@prefecturaneamt.ro,Neamț,,Prefectura
+"Călărași",prefectura@prefecturacalarasi.ro,Călărași,,Prefectura
+"Brăila",informatiipublice@prefecturabraila.ro,Brăila,,Prefectura
+"Dolj",office@prefecturadolj.ro,Dolj,,Prefectura
+"Satu Mare",contact@prefecturasatumare.ro,Satu Mare,,Prefectura
+"Prahova",prahova.gov@rdsmail.ro,Prahova,,Prefectura
+"Botoșani",email@prefecturabotosani.ro,Botoșani,,Prefectura
+"Mureș",prefect@prefecturamures.ro,Mureș,,Prefectura
+"Olt",prefectura@prefecturaolt.ro,Olt,,Prefectura
+"Alba",prefectura@prefecturaalba.ro,Alba,,Prefectura
+"Ilfov",cancelarie@prefecturailfov.ro,Ilfov,,Prefectura
+"Giurgiu",secretariat1@prefecturagiurgiu.ro,Giurgiu,,Prefectura
+"Vaslui",prefectura@prefecturavaslui.ro,Vaslui,,Prefectura
+"Brașov",cabinet.prefect@prefecturabrasov.ro,Brașov,,Prefectura
+"Sibiu",institutiaprefectului@prefecturasibiu.ro,Sibiu,,Prefectura
+"Ialomița",cancelarie@prefecturaialomita.ro;,Ialomița,,Prefectura
+"Vrancea",prefectura@prefecturavrancea.ro,,,Prefectura
+"Caraș-Severin",prefect@prefcs.ro,Caraș-Severin,,Prefectura
+"Dâmbovița",secretariat.ipdb@mai.gov.ro,,Dâmbovița,,Prefectura
+"Argeș",relatii.publice@prefecturaarges.ro,Argeș,,Prefectura
+"Cluj-Napoca",prefectura@prefecturacluj.ro,Cluj-Napoca,,Prefectura

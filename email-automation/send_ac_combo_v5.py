@@ -69,7 +69,7 @@
     69|<b>GAL Oamenii Deltei</b>
     70|</p>
     71|
-    72|<p style="margin-top:24px;">Dacă aveți 15 minute săptămâna viitoare, vă arăt cum funcționează în practică pentru <b>GAL Delta Dunării</b>. Aplicația este deja disponibilă pe Google Play.</p>
+    72|<p style="margin-top:24px;">Dacă aveți 15 minute săptămâna viitoare, vă arătăm cum funcționează în practică pentru <b>GAL Delta Dunării</b>. Aplicația este deja disponibilă pe Google Play.</p>
     73|
     74|<p>Întrebări? Răspund direct la acest email.</p>
     75|

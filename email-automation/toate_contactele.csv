@@ -1,0 +1,230 @@
+1|Nume,Email,Judet,Telefon,Tip
+     2|"Consiliul Judetean Alba",consiliu@cjalba.ro,Alba,,Consiliu Judetean
+     3|"Consiliul Judetean Arad",consiliu@cjarad.ro,Arad,,Consiliu Judetean
+     4|"Consiliul Judetean Arges",consiliu@cjarges.ro,Arges,,Consiliu Judetean
+     5|"Consiliul Judetean Bacau",consiliu@csjbacau.ro,Bacau,,Consiliu Judetean
+     6|"Consiliul Judetean Bihor",consiliu@cjbihor.ro,Bihor,,Consiliu Judetean
+     7|"Consiliul Judetean Bistrita-Nasaud",consiliu@portalbn.ro,Bistrita-Nasaud,,Consiliu Judetean
+     8|"Consiliul Judetean Botosani",consiliu@cjbotosani.ro,Botosani,,Consiliu Judetean
+     9|"Consiliul Judetean Braila",consiliu@cjbraila.ro,Braila,,Consiliu Judetean
+    10|"Consiliul Judetean Brasov",consiliu@judbrasov.ro,Brasov,,Consiliu Judetean
+    11|"Consiliul Judetean Buzau",consiliu@cjbuzau.ro,Buzau,,Consiliu Judetean
+    12|"Consiliul Judetean Calarasi",consiliu@cjcalarasi.ro,Calarasi,,Consiliu Judetean
+    13|"Consiliul Judetean Caras-Severin",consiliu@cjcs.ro,Caras-Severin,,Consiliu Judetean
+    14|"Consiliul Judetean Cluj",consiliu@cjcluj.ro,Cluj,,Consiliu Judetean
+    15|"Consiliul Judetean Constanta",consiliu@cjc.ro,Constanta,,Consiliu Judetean
+    16|"Consiliul Judetean Covasna",consiliu@kvmt.ro,Covasna,,Consiliu Judetean
+    17|"Consiliul Judetean Dambovita",consiliu@cjd.ro,Dambovita,,Consiliu Judetean
+    18|"Consiliul Judetean Dolj",consiliu@cjdolj.ro,Dolj,,Consiliu Judetean
+    19|"Consiliul Judetean Galati",consiliu@cjgalati.ro,Galati,,Consiliu Judetean
+    20|"Consiliul Judetean Giurgiu",consiliu@cjgiurgiu.ro,Giurgiu,,Consiliu Judetean
+    21|"Consiliul Judetean Gorj",consiliu@cjgorj.ro,Gorj,,Consiliu Judetean
+    22|"Consiliul Judetean Harghita",consiliu@judharghita.ro,Harghita,,Consiliu Judetean
+    23|"Consiliul Judetean Hunedoara",consiliu@cjhunedoara.ro,Hunedoara,,Consiliu Judetean
+    24|"Consiliul Judetean Ialomita",consiliu@cicnet.ro,Ialomita,,Consiliu Judetean
+    25|"Consiliul Judetean Iasi",consiliu@icc.ro,Iasi,,Consiliu Judetean
+    26|"Consiliul Judetean Ilfov",consiliu@cjilfov.ro,Ilfov,,Consiliu Judetean
+    27|"Consiliul Judetean Maramures",consiliu@cjmaramures.ro,Maramures,,Consiliu Judetean
+    28|"Consiliul Judetean Mehedinti",consiliu@cjmehedinti.ro,Mehedinti,,Consiliu Judetean
+    29|"Consiliul Judetean Mures",consiliu@cjmures.ro,Mures,,Consiliu Judetean
+    30|"Consiliul Judetean Neamt",consiliu@cjneamt.ro,Neamt,,Consiliu Judetean
+    31|"Consiliul Judetean Olt",consiliu@cjolt.ro,Olt,,Consiliu Judetean
+    32|"Consiliul Judetean Prahova",consiliu@cjph.ro,Prahova,,Consiliu Judetean
+    33|"Consiliul Judetean Salaj",consiliu@cjsalaj.ro,Salaj,,Consiliu Judetean
+    34|"Consiliul Judetean Satu Mare",consiliu@cjsm.ro,Satu Mare,,Consiliu Judetean
+    35|"Consiliul Judetean Sibiu",consiliu@cjsibiu.ro,Sibiu,,Consiliu Judetean
+    36|"Consiliul Judetean Suceava",consiliu@cjsuceava.ro,Suceava,,Consiliu Judetean
+    37|"Consiliul Judetean Teleorman",consiliu@cjteleorman.ro,Teleorman,,Consiliu Judetean
+    38|"Consiliul Judetean Timis",consiliu@cjtimis.ro,Timis,,Consiliu Judetean
+    39|"Consiliul Judetean Tulcea",consiliu@cjtulcea.ro,Tulcea,,Consiliu Judetean
+    40|"Consiliul Judetean Valcea",consiliu@cjvalcea.ro,Valcea,,Consiliu Judetean
+    41|"Consiliul Judetean Vaslui",consiliu@cjvaslui.ro,Vaslui,,Consiliu Judetean
+    42|"Consiliul Judetean Vrancea",consiliu@cjvrancea.ro,Vrancea,,Consiliu Judetean
+    43|"Primaria Alba Iulia",office@apulum.ro,Alba,,Primarie
+    44|"Primaria Alexandria",primaria@alexandria.ro,Teleorman,,Primarie
+    45|"Primaria Arad",primaria@primariaarad.ro,Arad,,Primarie
+    46|"Primaria Bacau",contactprimarie@primariabacau.ro,Bacau,,Primarie
+    47|"Primaria Baia Mare",primar@baiamare.ro,Maramures,,Primarie
+    48|"Primaria Bistrita",bruo@primariabistrita.ro,Bistrita-Nasaud,,Primarie
+    49|"Primaria Botosani",primaria@primariabt.ro,Botosani,,Primarie
+    50|"Primaria Braila",primaria@primariabraila.ro,Braila,,Primarie
+    51|"Primaria Brasov",contact@brasovcity.ro,Brasov,,Primarie
+    52|"Primaria Buzau",informatica@primariabuzau.ro,Buzau,,Primarie
+    53|"Primaria Calarasi",primaria@primaria-calarasi.ro,Calarasi,,Primarie
+    54|"Primaria Cluj-Napoca",registratura@primariaclujnapoca.ro,Cluj,,Primarie
+    55|"Primaria Constanta",primarie@primaria-constanta.ro,Constanta,,Primarie
+    56|"Primaria Craiova",relatiicupublicul@primariacraiova.ro,Dolj,,Primarie
+    57|"Primaria Deva",primar@primariadeva.ro,Hunedoara,,Primarie
+    58|"Primaria Drobeta Turnu Severin",primaria@primariadrobeta.ro,Mehedinti,,Primarie
+    59|"Primaria Focsani",primarie@focsani.info,Vrancea,,Primarie
+    60|"Primaria Galati",primaria@primariagalati.ro,Galati,,Primarie
+    61|"Primaria Giurgiu",primaria@primariagiurgiu.ro,Giurgiu,,Primarie
+    62|"Primaria Iasi",informatii@primaria-iasi.ro,Iasi,,Primarie
+    63|"Primaria Miercurea Ciuc",varoshaza@szereda.ro,Harghita,,Primarie
+    64|"Primaria Oradea",primarie@oradea.ro,Bihor,,Primarie
+    65|"Primaria Piatra Neamt",infopn@primariapn.ro,Neamt,,Primarie
+    66|"Primaria Pitesti",primaria@primariapitesti.ro,Arges,,Primarie
+    67|"Primaria Ploiesti",comunicare@ploiesti.ro,Prahova,,Primarie
+    68|"Primaria Ramnicu Valcea",primaria@primariavl.ro,Valcea,,Primarie
+    69|"Primaria Resita",centru@primariaresita.ro,Caras-Severin,,Primarie
+    70|"Primaria Satu Mare",primaria@primariasm.ro,Satu Mare,,Primarie
+    71|"Primaria Sfantu Gheorghe",primaria@sfantugheorghe.ro,Covasna,,Primarie
+    72|"Primaria Sibiu",primarie@sibiu.ro,Sibiu,,Primarie
+    73|"Primaria Slatina",primaria@primariaslatina.ro,Olt,,Primarie
+    74|"Primaria Slobozia",primaria@slobozia-il.ro,Ialomita,,Primarie
+    75|"Primaria Suceava",primsv@primariasv.ro,Suceava,,Primarie
+    76|"Primaria Targoviste",primarulmunicipiuluitargoviste@pmtgv.ro,Dambovita,,Primarie
+    77|"Primaria Targu Jiu",primaria@targujiu.ro,Gorj,,Primarie
+    78|"Primaria Targu Mures",primaria@tirgumures.ro,Mures,,Primarie
+    79|"Primaria Timisoara",primaria@primariatm.ro,Timis,,Primarie
+    80|"Primaria Tulcea",copieci@primariatulcea.ro,Tulcea,,Primarie
+    81|"Primaria Vaslui",primaria@primariavaslui.ro,Vaslui,,Primarie
+    82|"Primaria Zalau",primaria@zalausj.ro,Salaj,,Primarie
+    83|"Primaria Sector 1",registratura@primarias1.ro,Bucuresti,,Primarie
+    84|"Primaria Sector 2",infopublice@ps2.ro,Bucuresti,,Primarie
+    85|"Primaria Sector 3",contact@primarie3.ro,Bucuresti,,Primarie
+    86|"Primaria Sector 4",contact@ps4.ro,Bucuresti,,Primarie
+    87|"Primaria Sector 5",primarie@sector5.ro,Bucuresti,,Primarie
+    88|"Primaria Sector 6",contact@primarie6.ro,Bucuresti,,Primarie
+    89|"Ministerul Mediului",registratura@mmediu.ro,Bucuresti,,Minister
+    90|"Ministerul Educatiei",registratura@edu.gov.ro,Bucuresti,,Minister
+    91|"Ministerul Sanatatii",relatii.publice@ms.ro,Bucuresti,,Minister
+    92|"Ministerul Dezvoltarii",comunicare@mdlpa.ro,Bucuresti,,Minister
+    93|"Ministerul Agriculturii",registratura@madr.ro,Bucuresti,,Minister
+    94|"Ministerul Muncii",relatiipublice@mmuncii.ro,Bucuresti,,Minister
+    95|"Ministerul Finantelor",relatiipublice@mfinante.gov.ro,Bucuresti,,Minister
+    96|"Ministerul Transporturilor",relatiipublice@mt.ro,Bucuresti,,Minister
+    97|"Ministerul Culturii",registratura@cultura.ro,Bucuresti,,Minister
+    98|"Ministerul Justitiei",registratura@just.ro,Bucuresti,,Minister
+    99|"ANCPI",office@ancpi.ro,Bucuresti,,Agentie
+   100|"APIA",cabinet@apia.org.ro,Bucuresti,,Agentie
+   101|"AFIR",registratura@afir.info,Bucuresti,,Agentie
+   102|"ANM",relatii@meteoromania.ro,Bucuresti,,Agentie
+   103|"ANCOM",registratura@ancom.ro,Bucuresti,,Agentie
+   104|"ANRE",anre@anre.ro,Bucuresti,,Agentie
+   105|"Agentia Nationala a Functionarilor Publici",office@anfp.gov.ro,Bucuresti,,Agentie
+   106|"Agentia pentru Digitalizarea Romaniei",secretariat@adr.gov.ro,Bucuresti,,Agentie
+   107|"DSP Alba",secretariat@dspalba.ro,Alba,,DSP
+   108|"DSP Arad",secretariat@dsparad.ro,Arad,,DSP
+   109|"DSP Arges",secretariat@dsparges.ro,Arges,,DSP
+   110|"DSP Bacau",secretariat@dspbacau.ro,Bacau,,DSP
+   111|"DSP Bihor",secretariat@dspbihor.ro,Bihor,,DSP
+   112|"DSP Bistrita-Nasaud",secretariat@dspbistrita-nasaud.ro,Bistrita-Nasaud,,DSP
+   113|"DSP Botosani",secretariat@dspbotosani.ro,Botosani,,DSP
+   114|"DSP Braila",secretariat@dspbraila.ro,Braila,,DSP
+   115|"DSP Brasov",secretariat@dspbrasov.ro,Brasov,,DSP
+   116|"DSP Buzau",secretariat@dspbuzau.ro,Buzau,,DSP
+   117|"DSP Calarasi",secretariat@dspcalarasi.ro,Calarasi,,DSP
+   118|"DSP Caras-Severin",secretariat@dspcaras-severin.ro,Caras-Severin,,DSP
+   119|"DSP Cluj",secretariat@dspcluj.ro,Cluj,,DSP
+   120|"DSP Constanta",secretariat@dspconstanta.ro,Constanta,,DSP
+   121|"DSP Covasna",secretariat@dspcovasna.ro,Covasna,,DSP
+   122|"DSP Dambovita",secretariat@dspdambovita.ro,Dambovita,,DSP
+   123|"DSP Dolj",secretariat@dspdolj.ro,Dolj,,DSP
+   124|"DSP Galati",secretariat@dspgalati.ro,Galati,,DSP
+   125|"DSP Giurgiu",secretariat@dspgiurgiu.ro,Giurgiu,,DSP
+   126|"DSP Gorj",secretariat@dspgorj.ro,Gorj,,DSP
+   127|"DSP Harghita",secretariat@dspharghita.ro,Harghita,,DSP
+   128|"DSP Hunedoara",secretariat@dsphunedoara.ro,Hunedoara,,DSP
+   129|"DSP Ialomita",secretariat@dspialomita.ro,Ialomita,,DSP
+   130|"DSP Iasi",secretariat@dspiasi.ro,Iasi,,DSP
+   131|"DSP Ilfov",secretariat@dspilfov.ro,Ilfov,,DSP
+   132|"DSP Maramures",secretariat@dspmaramures.ro,Maramures,,DSP
+   133|"DSP Mehedinti",secretariat@dspmehedinti.ro,Mehedinti,,DSP
+   134|"DSP Mures",secretariat@dspmures.ro,Mures,,DSP
+   135|"DSP Neamt",secretariat@dspneamt.ro,Neamt,,DSP
+   136|"DSP Olt",secretariat@dspolt.ro,Olt,,DSP
+   137|"DSP Prahova",secretariat@dspprahova.ro,Prahova,,DSP
+   138|"DSP Salaj",secretariat@dspsalaj.ro,Salaj,,DSP
+   139|"DSP Satu Mare",secretariat@dspsatumare.ro,Satu Mare,,DSP
+   140|"DSP Sibiu",secretariat@dspsibiu.ro,Sibiu,,DSP
+   141|"DSP Suceava",secretariat@dspsuceava.ro,Suceava,,DSP
+   142|"DSP Teleorman",secretariat@dspteleorman.ro,Teleorman,,DSP
+   143|"DSP Timis",secretariat@dsptimis.ro,Timis,,DSP
+   144|"DSP Tulcea",secretariat@dsptulcea.ro,Tulcea,,DSP
+   145|"DSP Valcea",secretariat@dspvalcea.ro,Valcea,,DSP
+   146|"DSP Vaslui",secretariat@dspvaslui.ro,Vaslui,,DSP
+   147|"DSP Vrancea",secretariat@dspvrancea.ro,Vrancea,,DSP
+   148|"DAJ Alba",office@dadralba.ro,Alba,,Directie Agricola
+   149|"DAJ Arad",office@dadrarad.ro,Arad,,Directie Agricola
+   150|"DAJ Arges",office@dadrarges.ro,Arges,,Directie Agricola
+   151|"DAJ Bacau",office@dadrbacau.ro,Bacau,,Directie Agricola
+   152|"DAJ Bihor",office@dadrbihor.ro,Bihor,,Directie Agricola
+   153|"DAJ Bistrita-Nasaud",office@dadrbistrita-nasaud.ro,Bistrita-Nasaud,,Directie Agricola
+   154|"DAJ Botosani",office@dadrbotosani.ro,Botosani,,Directie Agricola
+   155|"DAJ Braila",office@dadrbraila.ro,Braila,,Directie Agricola
+   156|"DAJ Brasov",office@dadrbrasov.ro,Brasov,,Directie Agricola
+   157|"DAJ Buzau",office@dadrbuzau.ro,Buzau,,Directie Agricola
+   158|"DAJ Calarasi",office@dadrcalarasi.ro,Calarasi,,Directie Agricola
+   159|"DAJ Caras-Severin",office@dadrcaras-severin.ro,Caras-Severin,,Directie Agricola
+   160|"DAJ Cluj",office@dadrcluj.ro,Cluj,,Directie Agricola
+   161|"DAJ Constanta",office@dadrconstanta.ro,Constanta,,Directie Agricola
+   162|"DAJ Covasna",office@dadrcovasna.ro,Covasna,,Directie Agricola
+   163|"DAJ Dambovita",office@dadrdambovita.ro,Dambovita,,Directie Agricola
+   164|"DAJ Dolj",office@dadrdolj.ro,Dolj,,Directie Agricola
+   165|"DAJ Galati",office@dadrgalati.ro,Galati,,Directie Agricola
+   166|"DAJ Giurgiu",office@dadrgiurgiu.ro,Giurgiu,,Directie Agricola
+   167|"DAJ Gorj",office@dadrgorj.ro,Gorj,,Directie Agricola
+   168|"DAJ Harghita",office@dadrharghita.ro,Harghita,,Directie Agricola
+   169|"DAJ Hunedoara",office@dadrhunedoara.ro,Hunedoara,,Directie Agricola
+   170|"DAJ Ialomita",office@dadrialomita.ro,Ialomita,,Directie Agricola
+   171|"DAJ Iasi",office@dadriasi.ro,Iasi,,Directie Agricola
+   172|"DAJ Ilfov",office@dadrilfov.ro,Ilfov,,Directie Agricola
+   173|"DAJ Maramures",office@dadrmaramures.ro,Maramures,,Directie Agricola
+   174|"DAJ Mehedinti",office@dadrmehedinti.ro,Mehedinti,,Directie Agricola
+   175|"DAJ Mures",office@dadrmures.ro,Mures,,Directie Agricola
+   176|"DAJ Neamt",office@dadrneamt.ro,Neamt,,Directie Agricola
+   177|"DAJ Olt",office@dadrolt.ro,Olt,,Directie Agricola
+   178|"DAJ Prahova",office@dadrprahova.ro,Prahova,,Directie Agricola
+   179|"DAJ Salaj",office@dadrsalaj.ro,Salaj,,Directie Agricola
+   180|"DAJ Satu Mare",office@dadrsatumare.ro,Satu Mare,,Directie Agricola
+   181|"DAJ Sibiu",office@dadrsibiu.ro,Sibiu,,Directie Agricola
+   182|"DAJ Suceava",office@dadrsuceava.ro,Suceava,,Directie Agricola
+   183|"DAJ Teleorman",office@dadrteleorman.ro,Teleorman,,Directie Agricola
+   184|"DAJ Timis",office@dadrtimis.ro,Timis,,Directie Agricola
+   185|"DAJ Tulcea",office@dadrtulcea.ro,Tulcea,,Directie Agricola
+   186|"DAJ Valcea",office@dadrvalcea.ro,Valcea,,Directie Agricola
+   187|"DAJ Vaslui",office@dadrvaslui.ro,Vaslui,,Directie Agricola
+   188|"DAJ Vrancea",office@dadrvrancea.ro,Vrancea,,Directie Agricola
+   189|
+"GAL Delta Dunării",office@galdeltadunarii.ro,Tulcea,,GAL
+"GAL Dobrogea de Sud",office@galdobrogea.ro,Constanța,,GAL
+"GAL Dunărea Veche",contact@galdunareaveche.ro,Brăila,,GAL
+"GAL Muntenia de Nord-Est",office@galmuntenia.ro,Buzău,,GAL
+"GAL Văile Prahovei",contact@galvaileprahovei.ro,Prahova,,GAL
+"GAL Teleorman",office@galteleorman.ro,Teleorman,,GAL
+"GAL Giurgiu",contact@galgiurgiu.ro,Giurgiu,,GAL
+"GAL Ilfov Nord",office@galilfovnord.ro,Ilfov,,GAL
+"GAL Ținutul Zimbrului",office@galtinutulzimbrului.ro,Vrancea,,GAL
+"GAL Podișul de Nord",contact@galpodisuldenord.ro,Bacău,,GAL
+"GAL Moldova Prutului de Jos",office@galmoldovaprutuluidejos.ro,Vaslui,,GAL
+"GAL Colinele Tutovei",contact@galcolineletutovei.ro,Iași,,GAL
+"GAL Bucovina de Nord",office@galbucovindenord.ro,Suceava,,GAL
+"GAL Țara Dornelor",contact@galtaradornelor.ro,Suceava,,GAL
+"GAL Moldova de Mijloc",office@galmoldovademijloc.ro,Neamț,,GAL
+"GAL Maramureș",contact@galmaramures.ro,Maramureș,,GAL
+"GAL Sălaj",office@galsalaj.ro,Sălaj,,GAL
+"GAL Bistrița-Năsăud",contact@galbistrita.ro,Bistrița-Năsăud,,GAL
+"GAL Cluj",office@galcluj.ro,Cluj,,GAL
+"GAL Mureș",contact@galmures.ro,Mureș,,GAL
+"GAL Harghita",office@galharghita.ro,Harghita,,GAL
+"GAL Covasna",contact@galcovasna.ro,Covasna,,GAL
+"GAL Brașov",office@galbrasov.ro,Brașov,,GAL
+"GAL Sibiu",contact@galsibiu.ro,Sibiu,,GAL
+"GAL Alba",office@galalba.ro,Alba,,GAL
+"GAL Hunedoara",contact@galhunedoara.ro,Hunedoara,,GAL
+"GAL Arad",office@galarad.ro,Arad,,GAL
+"GAL Timiș",contact@galtimis.ro,Timiș,,GAL
+"GAL Caraș-Severin",office@galcarasseverin.ro,Caraș-Severin,,GAL
+"GAL Mehedinți",contact@galmehedinti.ro,Mehedinți,,GAL
+"GAL Gorj",office@galgorj.ro,Gorj,,GAL
+"GAL Vâlcea",contact@galvalcea.ro,Vâlcea,,GAL
+"GAL Argeș",office@galarges.ro,Argeș,,GAL
+"GAL Dâmbovița",contact@galdambovita.ro,Dâmbovița,,GAL
+"GAL Olt",office@galolt.ro,Olt,,GAL
+"GAL Dolj",contact@galdolj.ro,Dolj,,GAL
+"GAL Bihor",office@galbihor.ro,Bihor,,GAL
+"GAL Satu Mare",contact@galsatumare.ro,Satu Mare,,GAL
+"GAL Botoșani",office@galbotosani.ro,Botoșani,,GAL
+"GAL Călărași",contact@galcalarasi.ro,Călărași,,GAL
+"GAL Ialomița",office@galialomita.ro,Ialomița,,GAL

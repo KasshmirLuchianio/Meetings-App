@@ -11,7 +11,7 @@ Mă numesc Vlad Grigorov și am creat Meetings.ro — o aplicație care genereaz
 Practic: înregistrați ședința, AI-ul transcrie și scoate PV-ul gata de semnare. 15 ore pe lună economisite.
 
 Aplicația e gratuită pe Google Play: 
-https://play.google.com/store/apps/details?id=com.yourcompany.meetingsro
+https://play.google.com/store/apps/details?id=ro.meetingsapp.meetings
 
 Vă las și site-ul: https://meetings.ro
 
@@ -28,7 +28,7 @@ V-am scris acum câteva zile despre Meetings.ro — soluția automată pentru pr
 Dacă ați avut timp să vă uitați pe aplicație, aș fi curios să știu ce părere aveți. 
 
 Dacă nu, nicio problemă — vă las link-ul din nou:
-https://play.google.com/store/apps/details?id=com.yourcompany.meetingsro
+https://play.google.com/store/apps/details?id=ro.meetingsapp.meetings
 
 O zi bună!
 """

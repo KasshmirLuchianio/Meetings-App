@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Easing } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Easing, ActivityIndicator } from 'react-native';
 import RecordingOrb from './RecordingOrb';
 import { useRecording } from '../context/RecordingContext';
 
@@ -7,43 +7,53 @@ const WARNING_THRESHOLD_SECONDS = 20 * 60;   // gentle orange tint at 20 min
 const INFO_THRESHOLD_SECONDS = 60 * 60;      // reassuring info note at 60 min
 
 export default function RecordingScreen() {
-  const { isRecording, duration, durationSeconds, stopRecording } = useRecording();
+  const { isRecording, isProcessing, duration, durationSeconds, stopRecording } = useRecording();
   const bgOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.timing(bgOpacity, {
-      toValue: isRecording ? 1 : 0,
+      toValue: (isRecording || isProcessing) ? 1 : 0,
       duration: 600,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
-  }, [isRecording]);
+  }, [isRecording, isProcessing]);
 
-  if (!isRecording && (bgOpacity as any)._value === 0) {
+  if (!isRecording && !isProcessing && (bgOpacity as any)._value === 0) {
     return null;
   }
 
   return (
-    <Animated.View style={[styles.container, { opacity: bgOpacity }]} pointerEvents={isRecording ? 'auto' : 'none'}>
+    <Animated.View style={[styles.container, { opacity: bgOpacity }]} pointerEvents={isRecording || isProcessing ? 'auto' : 'none'}>
       <View style={styles.content}>
-        <RecordingOrb isRecording={isRecording} />
-        <Text style={[
-          styles.timer,
-          durationSeconds >= WARNING_THRESHOLD_SECONDS && durationSeconds < INFO_THRESHOLD_SECONDS && styles.timerWarnOrange,
-        ]}>{duration}</Text>
-
-        {durationSeconds >= INFO_THRESHOLD_SECONDS ? (
-          <Text style={styles.infoNote}>Înregistrare lungă — va fi procesată automat în segmente ✓</Text>
-        ) : durationSeconds >= WARNING_THRESHOLD_SECONDS ? (
-          <Text style={styles.warningOrange}>Înregistrare lungă — continuă fără griji</Text>
+        {isProcessing ? (
+          <>
+            <ActivityIndicator size="large" color="#FAF8F3" />
+            <Text style={styles.processingTitle}>Se procesează...</Text>
+            <Text style={styles.processingHint}>Înregistrarea este salvată și se generează raportul</Text>
+          </>
         ) : (
-          <Text style={styles.hint}>Vorbește clar și natural</Text>
-        )}
+          <>
+            <RecordingOrb isRecording={isRecording} />
+            <Text style={[
+              styles.timer,
+              durationSeconds >= WARNING_THRESHOLD_SECONDS && durationSeconds < INFO_THRESHOLD_SECONDS && styles.timerWarnOrange,
+            ]}>{duration}</Text>
 
-        <TouchableOpacity style={styles.stopButton} onPress={stopRecording} activeOpacity={0.7}>
-          <View style={styles.stopIcon} />
-        </TouchableOpacity>
-        <Text style={styles.stopLabel}>Oprește înregistrarea</Text>
+            {durationSeconds >= INFO_THRESHOLD_SECONDS ? (
+              <Text style={styles.infoNote}>Înregistrare lungă — va fi procesată automat în segmente ✓</Text>
+            ) : durationSeconds >= WARNING_THRESHOLD_SECONDS ? (
+              <Text style={styles.warningOrange}>Înregistrare lungă — continuă fără griji</Text>
+            ) : (
+              <Text style={styles.hint}>Vorbește clar și natural</Text>
+            )}
+
+            <TouchableOpacity style={styles.stopButton} onPress={stopRecording} activeOpacity={0.7}>
+              <View style={styles.stopIcon} />
+            </TouchableOpacity>
+            <Text style={styles.stopLabel}>Oprește înregistrarea</Text>
+          </>
+        )}
       </View>
     </Animated.View>
   );
@@ -115,5 +125,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'rgba(250,248,243,0.4)',
     letterSpacing: 0.5,
+  },
+  processingTitle: {
+    fontSize: 22,
+    fontWeight: '600',
+    color: '#FAF8F3',
+    letterSpacing: 1,
+    marginTop: 8,
+  },
+  processingHint: {
+    fontSize: 14,
+    color: 'rgba(250,248,243,0.5)',
+    letterSpacing: 0.5,
+    marginTop: 8,
+    textAlign: 'center',
   },
 });

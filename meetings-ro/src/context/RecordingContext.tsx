@@ -3,6 +3,8 @@ import React, { createContext, useContext, useState, useRef, useCallback } from 
 interface RecordingContextType {
   isRecording: boolean;
   setIsRecording: (val: boolean) => void;
+  isProcessing: boolean;
+  setIsProcessing: (val: boolean) => void;
   duration: string;
   setDuration: (val: string) => void;
   durationSeconds: number;
@@ -14,6 +16,8 @@ interface RecordingContextType {
 const RecordingContext = createContext<RecordingContextType>({
   isRecording: false,
   setIsRecording: () => {},
+  isProcessing: false,
+  setIsProcessing: () => {},
   duration: '00:00',
   setDuration: () => {},
   durationSeconds: 0,
@@ -24,6 +28,7 @@ const RecordingContext = createContext<RecordingContextType>({
 
 export function RecordingProvider({ children }: { children: React.ReactNode }) {
   const [isRecording, setIsRecording] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [duration, setDuration] = useState('00:00');
   const [durationSeconds, setDurationSeconds] = useState(0);
   const stopHandlerRef = useRef<(() => void) | null>(null);
@@ -41,6 +46,8 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
       value={{
         isRecording,
         setIsRecording,
+        isProcessing,
+        setIsProcessing,
         duration,
         setDuration,
         durationSeconds,
