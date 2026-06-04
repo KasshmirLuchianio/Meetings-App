@@ -5566,7 +5566,9 @@ async def _notify_pv_ready(meeting:dict):
     u = await users_col.find_one({"_id":ObjectId(meeting["user_id"])})
     if not u or not u.get("email"): return
     try:
-        resend.Emails.send({"from":"Meetings.ro <notificari@meetings-ro.app>","to":[u["email"]],"subject":f"PV gata: {meeting.get('title','Sedinta')}","html":'<div style="font-family:Arial;max-width:500px;margin:auto;padding:24px;background:#FAF8F3"><h2 style="color:#1B2A4A">PV gata!</h2><p>Inregistrarea a fost procesata. Deschide aplicatia.</p><a href="https://meetings.ro" style="display:inline-block;padding:12px 24px;background:#1B2A4A;color:white;text-decoration:none;border-radius:6px">Vezi raportul</a></div>'})
+        mid = str(meeting["_id"])
+        deep_link = f"meetingsro://meeting/{mid}"
+        resend.Emails.send({"from":"Meetings.ro <notificari@meetings-ro.app>","to":[u["email"]],"subject":f"PV gata: {meeting.get('title','Sedinta')}","html":f'<div style="font-family:Arial;max-width:500px;margin:auto;padding:24px;background:#FAF8F3"><h2 style="color:#1B2A4A">PV gata!</h2><p>Inregistrarea a fost procesata. Deschide aplicatia.</p><a href="{deep_link}" style="display:inline-block;padding:12px 24px;background:#1B2A4A;color:white;text-decoration:none;border-radius:6px">Vezi raportul complet</a></div>'})
         print(f"[Notify] OK {u['email']}")
     except Exception as e: print(f"[Notify] fail: {e}")
 
