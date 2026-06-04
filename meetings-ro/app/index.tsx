@@ -103,6 +103,9 @@ export default function HomeScreen() {
       }
       const meeting = await createRes.json();
 
+      // Navigate IMMEDIATELY to processing screen — don't wait for upload
+      router.push(`/meeting/${meeting._id}`);
+
       const formData = new FormData();
       formData.append('file', {
         uri,
@@ -130,7 +133,6 @@ export default function HomeScreen() {
         throw new Error(errBody.detail || `Upload eșuat (${uploadRes.status})`);
       }
       await refreshUsage();
-      router.push(`/meeting/${meeting._id}`);
     } catch (err: any) {
       setIsProcessing(false);
       alert(err.message || 'Eroare la încărcarea înregistrării');

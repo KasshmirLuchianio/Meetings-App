@@ -2782,7 +2782,8 @@ async def process_meeting(meeting_id: str):
         )
 
         # Notify user that PV is ready
-        await _notify_pv_ready(meeting)
+        # DISABLED — user prefers in-app navigation, not email notifications
+        # await _notify_pv_ready(meeting)
 
         # Cache transcription: update meeting object for downstream consumers
 
