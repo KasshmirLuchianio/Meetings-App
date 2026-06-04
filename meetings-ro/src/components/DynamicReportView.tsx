@@ -273,6 +273,19 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setExporting(format);
+
+    const fallbackShare = async () => {
+      const isAvail = await Sharing.isAvailableAsync();
+      if (!isAvail) {
+        Alert.alert('Indisponibil', 'Salvarea nu este disponibila pe acest dispozitiv.');
+        return;
+      }
+      await Sharing.shareAsync(dl.uri, {
+        mimeType,
+        dialogTitle: 'Salveaza fisierul',
+        UTI: format === 'pdf' ? 'com.adobe.pdf' : 'org.openxmlformats.wordprocessingml.document',
+      });
+    };
     try {
       const endpoint = format === 'pv' ? 'export/proces-verbal' : `export/${format}`;
       const fileExt = format === 'pv' ? 'docx' : format;
@@ -291,32 +304,35 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
       });
       if (dl.status !== 200) throw new Error('Download failed');
 
-      // Open the native share sheet directly. The user picks what to do with
-      // the file — Save to Files / Drive (storage) or Email / WhatsApp /
-      // Telegram (sharing). One action, one tap, no permission prompts.
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (!isAvailable) {
-        Alert.alert(
-          'Indisponibil',
-          'Partajarea fișierelor nu este disponibilă pe acest dispozitiv.',
-        );
-        return;
-      }
-      try {
-        await Sharing.shareAsync(dl.uri, {
-          mimeType,
-          dialogTitle:
-            format === 'pv'
-              ? `Proces verbal — ${meeting.title || 'Ședință'}`
-              : `${meeting.title || 'Raport'} — ${format.toUpperCase()}`,
-          UTI:
-            format === 'pdf'
-              ? 'com.adobe.pdf'
-              : 'org.openxmlformats.wordprocessingml.document',
-        });
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } catch {
-        // User cancelled the share sheet — silent, no error toast.
+      // Save file to device using StorageAccessFramework (Android native "Save As").
+      // Opens a save location picker — user confirms, file is saved. No share sheet.
+      const safAvailable = FileSystem.StorageAccessFramework ? true : false;
+      if (safAvailable) {
+        try {
+          // Ask user where to save — opens native "Save" dialog
+          const perms = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+          if (perms.granted) {
+            const safFileUri = await FileSystem.StorageAccessFramework.createFileAsync(
+              perms.directoryUri, filename, mimeType,
+            );
+            const b64 = await FileSystem.readAsStringAsync(dl.uri, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            await FileSystem.StorageAccessFramework.writeAsStringAsync(
+              safFileUri, b64, { encoding: FileSystem.EncodingType.Base64 },
+            );
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            Alert.alert('Salvat', `Fișier salvat: ${filename}`);
+          } else {
+            // User cancelled directory picker — fallback to share
+            await fallbackShare();
+          }
+        } catch {
+          // SAF error — fallback to share sheet
+          await fallbackShare();
+        }
+      } else {
+        await fallbackShare();
       }
     } catch {
       Alert.alert('Eroare export', 'Nu am putut exporta fișierul.');
