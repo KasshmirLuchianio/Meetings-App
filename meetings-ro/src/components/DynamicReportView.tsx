@@ -274,18 +274,6 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setExporting(format);
 
-    const fallbackShare = async () => {
-      const isAvail = await Sharing.isAvailableAsync();
-      if (!isAvail) {
-        Alert.alert('Indisponibil', 'Salvarea nu este disponibila pe acest dispozitiv.');
-        return;
-      }
-      await Sharing.shareAsync(dl.uri, {
-        mimeType,
-        dialogTitle: 'Salveaza fisierul',
-        UTI: format === 'pdf' ? 'com.adobe.pdf' : 'org.openxmlformats.wordprocessingml.document',
-      });
-    };
     try {
       const endpoint = format === 'pv' ? 'export/proces-verbal' : `export/${format}`;
       const fileExt = format === 'pv' ? 'docx' : format;
@@ -297,43 +285,65 @@ export default function DynamicReportView({ meetingId }: { meetingId: string }) 
         : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
       const url = `${API_BASE_URL}/api/meetings/${meetingId}/${endpoint}`;
-      const fileUri = FileSystem.cacheDirectory + `${filePrefix}_${meetingId}.${fileExt}`;
+      const cacheUri = FileSystem.cacheDirectory + `${filePrefix}_${meetingId}.${fileExt}`;
       const authToken = await SecureStore.getItemAsync('auth_token');
-      const dl = await FileSystem.downloadAsync(url, fileUri, {
+      const dl = await FileSystem.downloadAsync(url, cacheUri, {
         headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
       });
       if (dl.status !== 200) throw new Error('Download failed');
 
-      // Save file to device using StorageAccessFramework (Android native "Save As").
-      // Opens a save location picker — user confirms, file is saved. No share sheet.
-      const safAvailable = FileSystem.StorageAccessFramework ? true : false;
+      // 1) Try SAF (native "Save As" dialog) first — best UX
+      const safAvailable = !!(FileSystem.StorageAccessFramework);
       if (safAvailable) {
         try {
-          // Ask user where to save — opens native "Save" dialog
           const perms = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
           if (perms.granted) {
-            const safFileUri = await FileSystem.StorageAccessFramework.createFileAsync(
+            const safUri = await FileSystem.StorageAccessFramework.createFileAsync(
               perms.directoryUri, filename, mimeType,
             );
-            const b64 = await FileSystem.readAsStringAsync(dl.uri, {
+            const b64 = await FileSystem.readAsStringAsync(cacheUri, {
               encoding: FileSystem.EncodingType.Base64,
             });
             await FileSystem.StorageAccessFramework.writeAsStringAsync(
-              safFileUri, b64, { encoding: FileSystem.EncodingType.Base64 },
+              safUri, b64, { encoding: FileSystem.EncodingType.Base64 },
             );
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             Alert.alert('Salvat', `Fișier salvat: ${filename}`);
-          } else {
-            // User cancelled directory picker — fallback to share
-            await fallbackShare();
+            setExporting(null);
+            return;
           }
         } catch {
-          // SAF error — fallback to share sheet
-          await fallbackShare();
+          // SAF failed — continue to permanent copy below
         }
-      } else {
-        await fallbackShare();
       }
+
+      // 2) SAF unavailable or failed — save to app's permanent document directory
+      //    No permissions needed, file stays in app storage forever
+      const docDir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+      const permUri = docDir + filename;
+      await FileSystem.copyAsync({ from: cacheUri, to: permUri });
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(
+        'Salvat!',
+        `Fișierul a fost salvat: ${filename}`,
+        [
+          { text: 'OK', style: 'cancel' },
+          {
+            text: 'Partajează',
+            onPress: async () => {
+              const isAvail = await Sharing.isAvailableAsync();
+              if (isAvail) {
+                await Sharing.shareAsync(permUri, {
+                  mimeType,
+                  dialogTitle: 'Partajeaza fisierul',
+                  UTI: format === 'pdf' ? 'com.adobe.pdf' : 'org.openxmlformats.wordprocessingml.document',
+                });
+              }
+            },
+          },
+        ],
+      );
     } catch {
       Alert.alert('Eroare export', 'Nu am putut exporta fișierul.');
     } finally {
