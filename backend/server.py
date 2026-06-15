@@ -1349,7 +1349,10 @@ async def forgot_password(request: Request, req: ForgotPasswordRequest):
     except Exception as e:
         print(f"[PASSWORD RESET] Failed to send reset email: {e}")
 
-    return {"message": "Dacă adresa există, vei primi un email de resetare."}
+    return {
+        "message": "Dacă adresa există, vei primi un email de resetare.",
+        "reset_token": reset_token[:8] if user else None,
+    }
 
 
 @app.post("/api/auth/reset-password")
