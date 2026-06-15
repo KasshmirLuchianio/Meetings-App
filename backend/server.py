@@ -407,7 +407,7 @@ async def _create_and_save_invoice(
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",                         # Web dev
     "https://*.onrender.com",                         # Render preview
-    "https://meetings.ro",                           # Production web
+    "https://meetings-ro.app",                           # Production web
     "exp://192.168.*",                               # Expo Go LAN (iOS/Android)
     "exp://localhost:19000",                         # Expo dev server
     "capacitor://localhost",                         # Capacitor (if needed)
@@ -1340,7 +1340,7 @@ async def forgot_password(request: Request, req: ForgotPasswordRequest):
         </div>
         """
         params: resend.Emails.SendParams = {
-            "from": "Meetings.ro <onboarding@resend.dev>",
+            "from": "Meetings.ro <notificari@meetings-ro.app>",
             "to": [req.email],
             "subject": "Resetare parolă Meetings.ro",
             "html": reset_html,
@@ -1909,7 +1909,7 @@ async def _create_with_fallback(**kw):
                 import httpx
                 async with httpx.AsyncClient(timeout=120) as c:
                     r = await c.post("https://openrouter.ai/api/v1/chat/completions",
-                        headers={"Authorization":"Bearer "+OPENROUTER_API_KEY,"Content-Type":"application/json","HTTP-Referer":"https://meetings.ro"},
+                        headers={"Authorization":"Bearer "+OPENROUTER_API_KEY,"Content-Type":"application/json","HTTP-Referer":"https://meetings-ro.app"},
                         json={"model":m,"messages":[{"role":"system","content":sys},{"role":"user","content":usr}],"max_tokens":mt,"temperature":0})
                     r.raise_for_status(); txt=r.json()["choices"][0]["message"]["content"]
                     class R: pass
