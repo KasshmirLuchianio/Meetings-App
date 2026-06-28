@@ -8,6 +8,11 @@ import shutil
 import asyncio
 import secrets
 import tempfile
+import ssl
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.utils import formataddr
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from io import BytesIO
@@ -91,6 +96,25 @@ print(f"[Stripe] mode={'LIVE' if _IS_LIVE_MODE else 'TEST'}, using {len(STRIPE_P
 
 # ==================== RESEND (Email) ====================
 resend.api_key = os.environ.get("RESEND_API_KEY")
+
+# ==================== SMTP (privateemail) ====================
+# Primary transport for transactional emails (verification, password reset, invites).
+# When SMTP_USER + SMTP_PASSWORD are set — e.g. the privateemail mailbox
+# contact@meetings-ro.app — all transactional email goes out over SMTP.
+# Resend (RESEND_API_KEY) stays as an automatic fallback if SMTP is down/unset.
+# Credentials are NEVER hardcoded — set them as env vars / Render secrets.
+SMTP_HOST = os.environ.get("SMTP_HOST", "mail.privateemail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "465"))  # 465 = SSL, 587 = STARTTLS
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+SMTP_FROM_NAME = os.environ.get("SMTP_FROM_NAME", "Meetings.ro")
+SMTP_FROM_EMAIL = os.environ.get("SMTP_FROM_EMAIL", SMTP_USER)
+SMTP_ENABLED = bool(SMTP_USER and SMTP_PASSWORD)
+print(
+    f"[Email] SMTP {'ENABLED' if SMTP_ENABLED else 'disabled'}"
+    + (f" — {SMTP_USER} via {SMTP_HOST}:{SMTP_PORT}" if SMTP_ENABLED else "")
+    + f"; Resend {'configured' if resend.api_key else 'not configured'}"
+)
 
 # ==================== SMARTBILL ====================
 SMARTBILL_EMAIL = "vladgrigorov1@gmail.com"
@@ -661,6 +685,61 @@ API_PUBLIC_URL = os.environ.get("API_PUBLIC_URL", "https://meetings-ro-api.onren
 EMAIL_FROM = "Meetings.ro <noreply@meetings-ro.app>"
 
 
+def _send_email_smtp(to: str, subject: str, html: str) -> None:
+    """Send one HTML email over SMTP (privateemail). Blocking — wrap callers in asyncio.to_thread."""
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = formataddr((SMTP_FROM_NAME, SMTP_FROM_EMAIL))
+    msg["To"] = to
+    msg.attach(MIMEText(html, "html", "utf-8"))
+
+    context = ssl.create_default_context()
+    if SMTP_PORT == 465:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=context, timeout=20) as server:
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_FROM_EMAIL, [to], msg.as_string())
+    else:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as server:
+            server.starttls(context=context)
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_FROM_EMAIL, [to], msg.as_string())
+
+
+def send_transactional_email(to: str, subject: str, html: str, resend_from: Optional[str] = None) -> bool:
+    """
+    Send a transactional HTML email. Prefers SMTP (privateemail) when configured,
+    and falls back to Resend if SMTP is unset or fails. Returns True on success.
+
+    This is a *blocking* call (SMTP / Resend SDK are sync) — from async code call it
+    via `await asyncio.to_thread(send_transactional_email, ...)` so the event loop
+    is never blocked on network latency.
+    """
+    if SMTP_ENABLED:
+        try:
+            _send_email_smtp(to, subject, html)
+            print(f"[Email] Sent to {to} via SMTP ({SMTP_HOST})")
+            return True
+        except Exception as e:
+            print(f"[Email] SMTP send to {to} failed: {e} — falling back to Resend")
+
+    if resend.api_key:
+        try:
+            resend.Emails.send({
+                "from": resend_from or EMAIL_FROM,
+                "to": [to],
+                "subject": subject,
+                "html": html,
+            })
+            print(f"[Email] Sent to {to} via Resend")
+            return True
+        except Exception as e:
+            print(f"[Email] Resend send to {to} failed: {e}")
+    elif not SMTP_ENABLED:
+        print(f"[Email] ⚠️ No transport configured (neither SMTP nor RESEND_API_KEY) — cannot send to {to}")
+
+    return False
+
+
 def build_verification_email_html(verification_url: str, name: str) -> str:
     """Branded HTML for the verification email — navy header, ivory body, orange accent."""
     greeting = f"Bună ziua, {name}!" if name else "Bună ziua!"
@@ -717,29 +796,17 @@ def build_verification_email_html(verification_url: str, name: str) -> str:
 
 async def send_verification_email(email: str, token: str, name: str = "") -> bool:
     """
-    Send the email-verification link via Resend.
+    Send the email-verification link (SMTP first, Resend fallback).
     Non-blocking — caller should `asyncio.create_task(...)` so registration
     is not delayed by SMTP / network latency.
     """
-    if not os.environ.get("RESEND_API_KEY"):
-        print(f"[EMAIL] ⚠️ RESEND_API_KEY not set — cannot send verification to {email}")
-        return False
-
     verification_url = f"{API_PUBLIC_URL}/api/auth/verify-email?token={token}"
-    try:
-        params = {
-            "from": EMAIL_FROM,
-            "to": [email],
-            "subject": "Verifică-ți adresa de email — Meetings.ro",
-            "html": build_verification_email_html(verification_url, name),
-        }
-        # resend SDK is sync — push to a thread so we don't block the event loop
-        await asyncio.to_thread(resend.Emails.send, params)
-        print(f"[Email] Verification email sent to {email}")
-        return True
-    except Exception as e:
-        print(f"[Email] Failed to send verification email to {email}: {e}")
-        return False
+    return await asyncio.to_thread(
+        send_transactional_email,
+        email,
+        "Verifică-ți adresa de email — Meetings.ro",
+        build_verification_email_html(verification_url, name),
+    )
 
 
 def is_email_verified(user: dict) -> bool:
@@ -1324,35 +1391,33 @@ async def forgot_password(request: Request, req: ForgotPasswordRequest):
         {"$set": {"reset_token": reset_token, "reset_token_expires": expires}}
     )
 
-    # Send reset email via Resend
-    try:
-        reset_html = f"""
-        <div style="font-family: 'DM Sans', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px;">
-            <h1 style="color: #1B2A4A; font-size: 24px;">Resetare parolă</h1>
-            <p style="color: #444; font-size: 16px;">Ai solicitat resetarea parolei pentru contul tău Meetings.ro.</p>
-            <p style="color: #444; font-size: 16px;">Folosește codul de mai jos în aplicație:</p>
-            <div style="background: #F3F4F6; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
-                <span style="font-size: 28px; font-weight: bold; color: #1B2A4A; letter-spacing: 2px;">{reset_token[:8]}</span>
-            </div>
-            <p style="color:#888; font-size:13px;">Codul expiră în 1 oră.</p>
-            <hr style="border:none; border-top:1px solid #eee; margin: 30px 0;">
-            <p style="color:#888; font-size:12px;">Meetings.ro — Transcriere și sinteză AI pentru orice domeniu</p>
+    # Send reset email (SMTP first, Resend fallback)
+    reset_html = f"""
+    <div style="font-family: 'DM Sans', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px;">
+        <h1 style="color: #1B2A4A; font-size: 24px;">Resetare parolă</h1>
+        <p style="color: #444; font-size: 16px;">Ai solicitat resetarea parolei pentru contul tău Meetings.ro.</p>
+        <p style="color: #444; font-size: 16px;">Folosește codul de mai jos în aplicație:</p>
+        <div style="background: #F3F4F6; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
+            <span style="font-size: 28px; font-weight: bold; color: #1B2A4A; letter-spacing: 2px;">{reset_token[:8]}</span>
         </div>
-        """
-        params: resend.Emails.SendParams = {
-            "from": "Meetings.ro <contact@meetings-ro.app>",
-            "to": [req.email],
-            "subject": "Resetare parolă Meetings.ro",
-            "html": reset_html,
-        }
-        resend.Emails.send(params)
-    except Exception as e:
-        print(f"[PASSWORD RESET] Failed to send reset email: {e}")
+        <p style="color:#888; font-size:13px;">Codul expiră în 1 oră.</p>
+        <hr style="border:none; border-top:1px solid #eee; margin: 30px 0;">
+        <p style="color:#888; font-size:12px;">Meetings.ro — Transcriere și sinteză AI pentru orice domeniu</p>
+    </div>
+    """
+    sent = await asyncio.to_thread(
+        send_transactional_email,
+        req.email,
+        "Resetare parolă Meetings.ro",
+        reset_html,
+        "Meetings.ro <contact@meetings-ro.app>",
+    )
+    if not sent:
+        print(f"[PASSWORD RESET] Reset email could NOT be sent to {req.email} — no working email transport")
 
-    return {
-        "message": "Dacă adresa există, vei primi un email de resetare.",
-        "reset_token": reset_token[:8] if user else None,
-    }
+    # NB: the reset code is delivered ONLY by email — never returned in the response,
+    # otherwise anyone could reset any account's password by reading the API reply.
+    return {"message": "Dacă adresa există, vei primi un email de resetare."}
 
 
 @app.post("/api/auth/reset-password")
@@ -3114,16 +3179,16 @@ async def invite_member(body: InviteRequest, user: dict = Depends(require_role("
     role_label = ROLE_LABELS_RO.get(role, role.capitalize())
 
     try:
-        resend.Emails.send({
-            "from": "Meetings.ro <noreply@resend.dev>",
-            "to": [email],
-            "subject": f"Invitație să te alături organizației {tenant_name}",
-            "html": INVITE_EMAIL_TEMPLATE.format(
+        await asyncio.to_thread(
+            send_transactional_email,
+            email,
+            f"Invitație să te alături organizației {tenant_name}",
+            INVITE_EMAIL_TEMPLATE.format(
                 tenant_name=tenant_name,
                 role_label=role_label,
                 accept_url=accept_url,
             ),
-        })
+        )
     except Exception as e:
         print(f"[Invite] Email failed: {e}. Token: {invite_token}")
         # Don't fail — return token so admin can share manually if needed
@@ -5572,7 +5637,13 @@ async def _notify_pv_ready(meeting:dict):
     try:
         mid = str(meeting["_id"])
         deep_link = f"meetingsro://meeting/{mid}"
-        resend.Emails.send({"from":"Meetings.ro <contact@meetings-ro.app>","to":[u["email"]],"subject":f"PV gata: {meeting.get('title','Sedinta')}","html":f'<div style="font-family:Arial;max-width:500px;margin:auto;padding:24px;background:#FAF8F3"><h2 style="color:#1B2A4A">PV gata!</h2><p>Inregistrarea a fost procesata. Deschide aplicatia.</p><a href="{deep_link}" style="display:inline-block;padding:12px 24px;background:#1B2A4A;color:white;text-decoration:none;border-radius:6px">Vezi raportul complet</a></div>'})
+        await asyncio.to_thread(
+            send_transactional_email,
+            u["email"],
+            f"PV gata: {meeting.get('title','Sedinta')}",
+            f'<div style="font-family:Arial;max-width:500px;margin:auto;padding:24px;background:#FAF8F3"><h2 style="color:#1B2A4A">PV gata!</h2><p>Inregistrarea a fost procesata. Deschide aplicatia.</p><a href="{deep_link}" style="display:inline-block;padding:12px 24px;background:#1B2A4A;color:white;text-decoration:none;border-radius:6px">Vezi raportul complet</a></div>',
+            "Meetings.ro <contact@meetings-ro.app>",
+        )
         print(f"[Notify] OK {u['email']}")
     except Exception as e: print(f"[Notify] fail: {e}")
 

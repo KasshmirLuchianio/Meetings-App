@@ -37,6 +37,21 @@ services:
         sync: false                   # Set manually in Render dashboard
       - key: JWT_SECRET
         sync: false                   # Set manually in Render dashboard
+      # ---------- Transactional email (privateemail SMTP) ----------
+      - key: SMTP_HOST
+        value: mail.privateemail.com  # Namecheap Private Email
+      - key: SMTP_PORT
+        value: "465"                  # 465 = SSL
+      - key: SMTP_USER
+        sync: false                   # contact@meetings-ro.app — set in Render dashboard
+      - key: SMTP_PASSWORD
+        sync: false                   # mailbox password — set in Render dashboard (secret!)
+      - key: SMTP_FROM_NAME
+        value: Meetings.ro
+      - key: SMTP_FROM_EMAIL
+        value: contact@meetings-ro.app
+      - key: RESEND_API_KEY
+        sync: false                   # optional fallback — set in Render dashboard
       - key: PORT
         value: "8000"
       - key: TZ
