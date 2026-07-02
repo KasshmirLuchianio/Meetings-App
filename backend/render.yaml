@@ -1,6 +1,11 @@
 # ============================================================
 # Meetings.ro — Render Deploy Config
-# All-in-one: FastAPI + MongoDB in same container
+# FastAPI on Render FREE plan + MongoDB Atlas M0 (extern, gratuit)
+#
+# ⚠️ Planul free NU are disc persistent: tot ce e scris local
+# (inclusiv un MongoDB local) se ȘTERGE la fiecare restart /
+# spin-down. De aceea baza de date TREBUIE să fie externă
+# (MongoDB Atlas M0 — gratuit). Vezi backend/FREE_PLAN_SETUP.md.
 # ============================================================
 
 services:
@@ -9,22 +14,16 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: ./backend
-    region: frankfurt  # eu-central — closest to Romania
-    plan: standard     # $25/mo — 2GB RAM, 1 CPU (sized for 4 uvicorn workers + mongod)
+    region: frankfurt  # eu-central — closest to Romania (și la Atlas Frankfurt)
+    plan: free         # 512MB RAM; spin-down după 15 min inactivitate
     branch: main
     healthCheckPath: /api/health
     autoDeploy: true
 
-    # ---------- Persistent disk for MongoDB data + uploads ----------
-    disk:
-      name: meetings-data
-      mountPath: /data                # MongoDB: /data/db, Uploads: /app/uploads symlinked
-      sizeGB: 10                      # 10GB — sufficient for ~5000 meetings
-
     # ---------- Environment variables ----------
     envVars:
       - key: MONGO_URL
-        value: mongodb://localhost:27017
+        sync: false                   # MongoDB Atlas URI (mongodb+srv://...) — set in dashboard
       - key: DB_NAME
         value: gal_meetings
       - key: OPENAI_API_KEY
@@ -52,6 +51,15 @@ services:
         value: contact@meetings-ro.app
       - key: RESEND_API_KEY
         sync: false                   # optional fallback — set in Render dashboard
+      # ---------- Daily MongoDB backup → S3 (optional, recomandat) ----------
+      - key: AWS_ACCESS_KEY_ID
+        sync: false                   # IAM user cu acces doar la bucket-ul de backup
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false                   # secret!
+      - key: S3_BACKUP_BUCKET
+        sync: false                   # ex: meetings-ro-backups
+      - key: AWS_REGION
+        value: eu-central-1
       - key: PORT
         value: "8000"
       - key: TZ
