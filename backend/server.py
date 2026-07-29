@@ -538,6 +538,8 @@ invitations_col = db["invitations"]
 processed_events_col = db["processed_events"]  # Stripe webhook idempotency
 invoices_col = db["invoices"]
 invoice_failures_col = db["invoice_failures"]
+audit_log_col = db["audit_log"]                # GDPR Art. 32 — who accessed what, when
+security_incidents_col = db["security_incidents"]  # GDPR Art. 33 — breach notification records
 
 
 # ==================== AUTH HELPERS ====================
@@ -558,6 +560,112 @@ def create_token(user_id: str, email: str) -> str:
         "iat": datetime.now(timezone.utc),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+# ==================== AUDIT LOG (GDPR Art. 32) ====================
+# Records who accessed/exported/deleted what, and when. Fire-and-forget: a
+# logging failure must never break the actual request, so callers schedule
+# this via asyncio.create_task instead of awaiting it inline.
+AUDIT_LOG_RETENTION_DAYS = int(os.environ.get("AUDIT_LOG_RETENTION_DAYS", "365"))
+
+
+async def log_audit_event(
+    action: str,
+    resource_type: str,
+    resource_id: str = None,
+    user: dict = None,
+    tenant_id: str = None,
+    request: Request = None,
+    extra: dict = None,
+    user_email: str = None,
+) -> None:
+    """Write one audit entry. Call via asyncio.create_task(log_audit_event(...))
+    from request handlers so a Mongo hiccup never fails the user-facing action.
+    `user_email` lets callers record failed logins for emails with no matching
+    account, where there's no `user` dict to pull the address from."""
+    try:
+        entry = {
+            "action": action,              # e.g. "login", "meeting.view", "meeting.export", "account.delete"
+            "resource_type": resource_type,  # e.g. "meeting", "user", "tenant"
+            "resource_id": resource_id,
+            "user_id": str(user["_id"]) if user else None,
+            "user_email": (user.get("email") if user else None) or user_email,
+            "tenant_id": tenant_id or (str(user.get("tenant_id")) if user and user.get("tenant_id") else None),
+            "ip_address": request.client.host if request and request.client else None,
+            "created_at": datetime.now(timezone.utc),
+        }
+        if extra:
+            entry["extra"] = extra
+        await audit_log_col.insert_one(entry)
+    except Exception as e:
+        print(f"[Audit] Failed to write audit entry ({action}/{resource_type}): {e}")
+
+
+def schedule_audit(*args, **kwargs) -> None:
+    """Non-blocking helper — fire-and-forget wrapper around log_audit_event."""
+    asyncio.create_task(log_audit_event(*args, **kwargs))
+
+
+# ==================== SECURITY INCIDENT ALERTING (GDPR Art. 33) ====================
+# Technical half of the breach-notification flow described in DPA Art. 9.
+# The procedural half (who decides, who signs off) is organizational and
+# lives in docs/DPA_GDPR_draft.md — this just makes sure an email actually
+# goes out the moment an incident is declared, instead of relying on someone
+# noticing a log line.
+SECURITY_ALERT_EMAIL = os.environ.get("SECURITY_ALERT_EMAIL", "")
+
+
+async def alert_security_incident(subject: str, details: dict) -> bool:
+    """Email SECURITY_ALERT_EMAIL with an incident report. Returns True if sent.
+    Always logs to security_incidents_col regardless of whether the email succeeds,
+    so there is a durable record even if SMTP is down."""
+    now = datetime.now(timezone.utc)
+    try:
+        await security_incidents_col.insert_one({**details, "subject": subject, "created_at": now})
+    except Exception as e:
+        print(f"[Security] Failed to persist incident record: {e}")
+
+    if not SECURITY_ALERT_EMAIL:
+        print(f"[Security] ⚠️ SECURITY_ALERT_EMAIL not set — incident NOT emailed: {subject}")
+        return False
+
+    rows = "".join(f"<tr><td style='padding:4px 12px 4px 0;color:#888'>{k}</td><td>{v}</td></tr>" for k, v in details.items())
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px">
+        <h2 style="color:#B91C1C">🔴 Incident de securitate — {subject}</h2>
+        <table style="font-size:14px">{rows}</table>
+        <p style="color:#888;font-size:12px">Raportat automat de Meetings.ro la {now.isoformat()}</p>
+    </div>
+    """
+    sent = await asyncio.to_thread(
+        send_transactional_email, SECURITY_ALERT_EMAIL, f"[Meetings.ro] Incident: {subject}", html,
+    )
+    if not sent:
+        print(f"[Security] ⚠️ Incident email FAILED to send for: {subject}")
+    return sent
+
+
+async def check_failed_login_threshold(email: str, window_minutes: int = 15, threshold: int = 5) -> None:
+    """Best-effort brute-force signal: if an email address has this many failed
+    logins in the window, fire a security alert. Cheap (reuses audit_log, no
+    extra infra) — not a replacement for real rate limiting (slowapi already
+    caps /auth/login at 10/minute), just an early warning for a human."""
+    try:
+        since = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+        count = await audit_log_col.count_documents({
+            "action": "login.failed", "user_email": email, "created_at": {"$gte": since},
+        })
+        if count == threshold:  # fire once per burst, not on every subsequent attempt
+            await alert_security_incident(
+                "Autentificări eșuate repetate",
+                {
+                    "email vizat": email,
+                    "incercari esuate": f"{count} in ultimele {window_minutes} minute",
+                    "actiune recomandata": "Verifică dacă e brute-force sau utilizatorul care și-a uitat parola",
+                },
+            )
+    except Exception as e:
+        print(f"[Security] Failed-login threshold check error: {e}")
 
 
 security = HTTPBearer()
@@ -886,14 +994,26 @@ async def monthly_usage_reset_job():
             await asyncio.sleep(60)
 
 
+# Reviewer accounts (Apple/Google App Review) need STABLE, predictable credentials
+# because they're typed into App Store Connect / Play Console "review notes" —
+# rotating them silently would break app approval. Security posture instead:
+# credentials come from env vars (so they're not permanently fixed in source
+# history) with the original values as fallback defaults for continuity, and the
+# plaintext password is never written to logs (Render logs are visible in the
+# dashboard and were the actual leak vector found in the Sprint 0 audit).
+DEMO_ACCOUNT_EMAIL = "demo@meetings.ro"
+DEMO_ACCOUNT_PASSWORD = os.environ.get("DEMO_ACCOUNT_PASSWORD", "Demo2026!")
+GOOGLE_REVIEW_EMAIL = "google-review@meetings-ro.app"
+GOOGLE_REVIEW_PASSWORD = os.environ.get("GOOGLE_REVIEW_PASSWORD", "GoogleReview2026!")
+
+
 async def create_demo_account():
     """Create a demo account for Apple Review (idempotent, race-safe for multi-worker startup)."""
-    demo_email = "demo@meetings.ro"
     now = datetime.now(timezone.utc)
     try:
         await users_col.insert_one({
-            "email": demo_email,
-            "password_hash": hash_password("Demo2026!"),
+            "email": DEMO_ACCOUNT_EMAIL,
+            "password_hash": hash_password(DEMO_ACCOUNT_PASSWORD),
             "name": "Demo User",
             "plan": "PRO",
             "email_verified": True,
@@ -901,7 +1021,7 @@ async def create_demo_account():
             "last_monthly_reset": now,
             "created_at": now,
         })
-        print("[DEMO] Demo account created: demo@meetings.ro / Demo2026!")
+        print(f"[DEMO] Demo account created: {DEMO_ACCOUNT_EMAIL} (password from env/default — not logged)")
     except DuplicateKeyError:
         # Another worker created it in parallel — that's fine
         pass
@@ -913,8 +1033,8 @@ async def create_google_review_account():
     Race-safe: uses insert + DuplicateKeyError handler, then refreshes critical fields.
     Runs once per worker on startup; multi-worker safe.
     """
-    review_email = "google-review@meetings-ro.app"
-    review_password = "GoogleReview2026!"
+    review_email = GOOGLE_REVIEW_EMAIL
+    review_password = GOOGLE_REVIEW_PASSWORD
     now = datetime.now(timezone.utc)
 
     try:
@@ -939,7 +1059,7 @@ async def create_google_review_account():
             "plan_updated_at":             now,
             "created_at":                  now,
         })
-        print(f"[GOOGLE] Review account created: {review_email} / {review_password} (plan=PRO, verified=True)")
+        print(f"[GOOGLE] Review account created: {review_email} (plan=PRO, verified=True, password from env/default — not logged)")
         return
     except DuplicateKeyError:
         # Account already exists — refresh critical fields below
@@ -990,6 +1110,12 @@ async def startup():
     await invoices_col.create_index([("created_at", -1)])
     await invoice_failures_col.create_index("user_email")
     await invoice_failures_col.create_index("needs_manual_review")
+    # Audit log — queried by tenant or by user, newest first; auto-purged after
+    # AUDIT_LOG_RETENTION_DAYS (GDPR DPA Art. 4.3 default retention).
+    await audit_log_col.create_index([("tenant_id", 1), ("created_at", -1)])
+    await audit_log_col.create_index([("user_id", 1), ("created_at", -1)])
+    await audit_log_col.create_index("created_at", expireAfterSeconds=AUDIT_LOG_RETENTION_DAYS * 86400)
+    await security_incidents_col.create_index([("created_at", -1)])
     await seed_default_localities()
     await create_demo_account()
     await create_google_review_account()
@@ -1087,9 +1213,13 @@ async def auth_login(request: Request, req: LoginRequest):
     """Login with email and password."""
     user = await users_col.find_one({"email": req.email})
     if not user:
+        schedule_audit("login.failed", "user", request=request, user_email=req.email, extra={"reason": "no_such_user"})
+        await check_failed_login_threshold(req.email)
         raise HTTPException(status_code=401, detail="Email sau parolă incorectă")
 
     if not verify_password(req.password, user["password_hash"]):
+        schedule_audit("login.failed", "user", str(user["_id"]), user=user, request=request, extra={"reason": "bad_password"})
+        await check_failed_login_threshold(req.email)
         raise HTTPException(status_code=401, detail="Email sau parolă incorectă")
 
     # NOTE: We deliberately do NOT auto-verify here. The mobile app reads
@@ -1098,6 +1228,7 @@ async def auth_login(request: Request, req: LoginRequest):
 
     user_id = str(user["_id"])
     token = create_token(user_id, req.email)
+    schedule_audit("login", "user", user_id, user=user, request=request)
 
     plan_key, used_minutes, limit_minutes = get_plan_quota(user)
     return {
@@ -1119,12 +1250,103 @@ async def auth_login(request: Request, req: LoginRequest):
     }
 
 
-# ---- ADMIN: Require admin role ----
+# ---- ADMIN: Require PLATFORM admin (not to be confused with tenant admin) ----
+# CRITICAL DISTINCTION: `user["role"] == "admin"` means "admin of one customer's
+# organization" — it's set automatically on ANY user who creates a tenant
+# (POST /api/tenants). That role is correct for require_role("admin") below,
+# which gates tenant-scoped actions (invite members, rename org, etc).
+#
+# It is NOT a platform admin. Before this fix, `require_admin` checked that
+# same `role` field — meaning every paying customer who created their own
+# organization could call platform-wide endpoints like
+# DELETE /api/admin/delete-all-users and wipe every account on the platform.
+# Verified the mobile app never calls /api/admin/* (grep found zero
+# references), so gating this more strictly breaks no shipped feature.
+#
+# Platform-admin status now comes from an explicit allowlist, not a DB field
+# any customer's own signup flow can set. Configure via Render env var:
+#   PLATFORM_ADMIN_EMAILS=you@example.com,teammate@example.com
+PLATFORM_ADMIN_EMAILS = {
+    e.strip().lower() for e in os.environ.get("PLATFORM_ADMIN_EMAILS", "").split(",") if e.strip()
+}
+if not PLATFORM_ADMIN_EMAILS:
+    print("[Security] ⚠️ PLATFORM_ADMIN_EMAILS not set — /api/admin/* endpoints are unreachable by anyone until configured.")
+
+
 async def require_admin(user: dict = Depends(get_current_user)) -> dict:
-    """Dependency that requires the user to have admin role."""
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Acces permis doar administratorilor")
+    """Dependency that requires the user to be a PLATFORM admin (env allowlist),
+    not merely the admin of their own tenant/organization."""
+    if user.get("email", "").lower() not in PLATFORM_ADMIN_EMAILS:
+        raise HTTPException(status_code=403, detail="Acces permis doar administratorilor platformei")
     return user
+
+
+# ==================== AUDIT LOG — viewing ====================
+
+@app.get("/api/audit-log")
+async def get_audit_log(
+    limit: int = Query(100, ge=1, le=500),
+    action: Optional[str] = None,
+    user: dict = Depends(require_role("admin")),
+):
+    """
+    View the audit trail (GDPR DPA Art. 8 — operator's right to demonstrate/
+    inspect compliance). Tenant-scoped: an org admin sees only their own
+    organization's entries, never other customers' — this is deliberately
+    require_role("admin") (tenant admin), not require_admin (platform admin).
+    A solo user with no tenant sees only their own actions.
+    """
+    query: dict = {}
+    tenant_id = user.get("tenant_id")
+    if tenant_id:
+        query["tenant_id"] = tenant_id
+    else:
+        query["user_id"] = str(user["_id"])
+    if action:
+        query["action"] = action
+
+    cursor = audit_log_col.find(query).sort("created_at", -1).limit(limit)
+    entries = [serialize_doc(doc) async for doc in cursor]
+    return {"count": len(entries), "entries": entries}
+
+
+# ==================== SECURITY INCIDENTS — manual reporting ====================
+
+class SecurityIncidentReport(BaseModel):
+    """Fields mirror DPA Art. 9.2's required breach-notification content, so
+    filling this form produces a notification that's already compliant in shape."""
+    nature: str                       # descrierea naturii încălcării
+    affected_categories: str          # categoriile de persoane vizate afectate
+    affected_count_estimate: str      # numărul aproximativ afectat
+    likely_consequences: str          # consecințele probabile
+    measures_taken: str               # măsurile luate/propuse
+
+
+@app.post("/api/admin/security-incident")
+async def report_security_incident(body: SecurityIncidentReport, admin: dict = Depends(require_admin)):
+    """
+    Platform-admin-only. Manually declare a security incident, matching the
+    fields DPA Art. 9.2 requires the Processor to send the Operator. Persists
+    to security_incidents_col and emails SECURITY_ALERT_EMAIL immediately —
+    this is the technical half of the breach-notification flow; the
+    procedural half (who decides, sign-off) is organizational, documented in
+    docs/DPA_GDPR_draft.md.
+    """
+    sent = await alert_security_incident(
+        "Incident raportat manual",
+        {
+            "raportat_de": admin.get("email"),
+            "natura": body.nature,
+            "categorii_afectate": body.affected_categories,
+            "numar_estimat": body.affected_count_estimate,
+            "consecinte_probabile": body.likely_consequences,
+            "masuri_luate": body.measures_taken,
+        },
+    )
+    return {
+        "message": "Incident înregistrat." + ("" if sent else " ⚠️ Emailul de alertă NU a putut fi trimis — verifică SECURITY_ALERT_EMAIL/SMTP."),
+        "email_sent": sent,
+    }
 
 
 @app.delete("/api/admin/delete-user")
@@ -1133,6 +1355,7 @@ async def admin_delete_user(email: str = Query(...), admin: dict = Depends(requi
     result = await users_col.delete_one({"email": email})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
+    schedule_audit("admin.user_delete", "user", None, user=admin, extra={"target_email": email})
     return {"message": f"User {email} deleted", "deleted": result.deleted_count}
 
 
@@ -1140,6 +1363,11 @@ async def admin_delete_user(email: str = Query(...), admin: dict = Depends(requi
 async def admin_delete_all_users(admin: dict = Depends(require_admin)):
     """Delete ALL users. Requires admin role."""
     result = await users_col.delete_many({})
+    schedule_audit("admin.user_delete_all", "user", None, user=admin, extra={"deleted_count": result.deleted_count})
+    await alert_security_incident(
+        "Ștergere în masă a utilizatorilor",
+        {"declansat_de": admin.get("email"), "numar_conturi_sterse": result.deleted_count},
+    )
     return {"message": f"All users deleted", "deleted": result.deleted_count}
 
 
@@ -1575,12 +1803,52 @@ async def resend_verification(current_user: dict = Depends(get_current_user)):
 
 @app.delete("/api/auth/delete-account")
 async def delete_account(current_user: dict = Depends(get_current_user)):
-    """Delete user account and all associated data. Required by Apple App Store."""
+    """Delete user account and all associated data. Required by Apple App Store.
+
+    GDPR DPA Art. 7 note: this deletes the primary copy immediately. It does
+    NOT purge the user from historical S3 backups (see backend/scripts/mongo_backup.py)
+    — those age out naturally via BACKUP_RETENTION_DAYS. A fully immediate
+    backup purge would need per-object tracking that doesn't exist yet; the
+    response is explicit about this instead of silently overpromising.
+    """
     import shutil
     user_id = str(current_user["_id"])
+    tenant_id = current_user.get("tenant_id")
+
+    # If this user is an org admin, refuse to silently orphan/strand teammates —
+    # require them to hand off or remove members first. Solo admins (no other
+    # members) can delete freely; their tenant is deleted along with them below.
+    other_members_count = 0
+    if tenant_id and current_user.get("role") == "admin":
+        other_members_count = await users_col.count_documents(
+            {"tenant_id": tenant_id, "_id": {"$ne": current_user["_id"]}}
+        )
+        if other_members_count > 0:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Ești administratorul unei organizații cu alți membri. "
+                    "Transferă rolul de admin sau elimină membrii înainte de a-ți șterge contul."
+                ),
+            )
+
+    # Audit the deletion BEFORE removing the account — afterwards there's no
+    # user_id left to attribute the entry to.
+    await log_audit_event(
+        "account.delete", "user", user_id, user=current_user,
+        extra={"was_tenant_admin": current_user.get("role") == "admin", "tenant_id": tenant_id},
+    )
 
     # Delete all user's meetings
     await meetings_col.delete_many({"user_id": user_id})
+
+    # Clean up invitations this user sent, so no dangling "invited_by" references
+    if tenant_id:
+        await invitations_col.delete_many({"invited_by": user_id})
+
+    # Sole admin of a tenant → the tenant has no other owner, delete it too
+    if tenant_id and current_user.get("role") == "admin" and other_members_count == 0:
+        await tenants_col.delete_one({"_id": ObjectId(tenant_id)})
 
     # Delete user record
     await users_col.delete_one({"_id": current_user["_id"]})
@@ -1590,7 +1858,59 @@ async def delete_account(current_user: dict = Depends(get_current_user)):
     if user_uploads_path.exists():
         shutil.rmtree(str(user_uploads_path), ignore_errors=True)
 
-    return {"message": "Contul și toate datele asociate au fost șterse definitiv."}
+    return {
+        "message": "Contul și toate datele asociate au fost șterse definitiv.",
+        "note": "Copiile de siguranță (backup) mai vechi expiră automat conform politicii de retenție.",
+    }
+
+
+@app.get("/api/users/me/export-data")
+async def export_my_data(current_user: dict = Depends(get_current_user)):
+    """
+    GDPR Art. 20 (portabilitate) / DPA Art. 7.3 — full personal data export,
+    not just a single meeting. Returns a ZIP with account info + every meeting
+    (including full transcript) as structured JSON, plus a plain-language
+    README. Synchronous/in-request: fine for an individual account's volume;
+    would need an async job + email-when-ready for very large orgs (see the
+    tenant-level export below, which has the same limitation noted).
+    """
+    import zipfile
+
+    user_id = str(current_user["_id"])
+    schedule_audit("user.data_export", "user", user_id, user=current_user)
+
+    user_data = serialize_doc(current_user)
+    user_data.pop("password_hash", None)
+    user_data.pop("reset_token", None)
+    user_data.pop("email_verification_token", None)
+
+    meetings = []
+    async for m in meetings_col.find({"user_id": user_id}):
+        meetings.append(serialize_doc(m))
+
+    readme = (
+        "Export de date personale — Meetings.ro\n"
+        f"Generat: {datetime.now(timezone.utc).isoformat()}\n"
+        f"Cont: {current_user.get('email')}\n\n"
+        "Conținut:\n"
+        "  cont.json      — datele contului tău\n"
+        "  sedinte.json   — toate ședințele tale, inclusiv transcrierea integrală\n\n"
+        "Fișierele audio nu sunt incluse în acest export (sunt șterse automat după "
+        "procesare, cu excepția cazului în care ai activat opțiunea de păstrare audio).\n"
+    )
+
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("README.txt", readme)
+        zf.writestr("cont.json", json.dumps(user_data, ensure_ascii=False, indent=2))
+        zf.writestr("sedinte.json", json.dumps(meetings, ensure_ascii=False, indent=2))
+    buf.seek(0)
+
+    filename = f"meetings-ro-export-{user_id}.zip"
+    return StreamingResponse(
+        buf, media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ==================== PUSH NOTIFICATIONS ====================
@@ -3101,7 +3421,132 @@ async def remove_tenant_member(user_id: str, user: dict = Depends(require_role("
         {"_id": ObjectId(user_id)},
         {"$set": {"tenant_id": None, "role": "member"}}
     )
+    schedule_audit("tenant.member_removed", "user", user_id, user=user, extra={"target_email": target.get("email")})
     return {"message": "Membrul a fost eliminat din organizație"}
+
+
+@app.get("/api/tenants/me/export-data")
+async def export_tenant_data(user: dict = Depends(require_role("admin"))):
+    """
+    GDPR Art. 20 / DPA Art. 7.3 — full organization data export (admin only).
+    Same shape as the personal export, scoped to the whole tenant: every
+    member's basic profile (no password hashes) + every meeting.
+
+    Known scaling limit: built synchronously in-request. For an organization
+    with a very large meeting history this could get slow; the fix is an
+    async export job that emails a download link when ready. Not built yet —
+    flagged here rather than silently shipped as if it scaled indefinitely.
+    """
+    import zipfile
+
+    tenant_id = user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=404, detail="Nu ești parte dintr-o organizație")
+    tenant = await tenants_col.find_one({"_id": ObjectId(tenant_id)})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Organizația nu există")
+
+    schedule_audit("tenant.data_export", "tenant", tenant_id, user=user, tenant_id=tenant_id)
+
+    members = []
+    async for m in users_col.find({"tenant_id": tenant_id}):
+        md = serialize_doc(m)
+        for sensitive in ("password_hash", "reset_token", "email_verification_token"):
+            md.pop(sensitive, None)
+        members.append(md)
+
+    meetings = []
+    async for m in meetings_col.find({"tenant_id": tenant_id}):
+        meetings.append(serialize_doc(m))
+
+    readme = (
+        "Export de date organizație — Meetings.ro\n"
+        f"Generat: {datetime.now(timezone.utc).isoformat()}\n"
+        f"Organizație: {tenant.get('name')}\n"
+        f"Solicitat de: {user.get('email')}\n\n"
+        "Conținut:\n"
+        "  organizatie.json — datele organizației\n"
+        "  membri.json      — toți membrii organizației (fără parole)\n"
+        "  sedinte.json     — toate ședințele organizației, inclusiv transcrierea integrală\n"
+    )
+
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("README.txt", readme)
+        zf.writestr("organizatie.json", json.dumps(serialize_doc(tenant), ensure_ascii=False, indent=2))
+        zf.writestr("membri.json", json.dumps(members, ensure_ascii=False, indent=2))
+        zf.writestr("sedinte.json", json.dumps(meetings, ensure_ascii=False, indent=2))
+    buf.seek(0)
+
+    filename = f"meetings-ro-export-tenant-{tenant_id}.zip"
+    return StreamingResponse(
+        buf, media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+class TenantWipeRequest(BaseModel):
+    confirm_name: str  # must match the tenant's exact name — guards against misclicks
+
+
+@app.delete("/api/tenants/me")
+async def delete_my_tenant(body: TenantWipeRequest, user: dict = Depends(require_role("admin"))):
+    """
+    Permanently delete the organization: all its meetings, all its members'
+    tenant membership, pending invitations, and the tenant record itself.
+
+    GDPR DPA Art. 7.1 — this is the "delete everything at contract end" button
+    for an institution's data. Destructive and irreversible, so it requires
+    typing the exact tenant name as confirmation (same pattern as GitHub repo
+    deletion) rather than a simple boolean flag that could be misclicked.
+    Member accounts themselves are NOT deleted — only their org membership;
+    they revert to standalone free-tier users.
+    """
+    tenant_id = user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=404, detail="Nu ești parte dintr-o organizație")
+    tenant = await tenants_col.find_one({"_id": ObjectId(tenant_id)})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Organizația nu există")
+    if body.confirm_name != tenant.get("name"):
+        raise HTTPException(
+            status_code=400,
+            detail="Numele de confirmare nu corespunde. Scrie exact numele organizației pentru a confirma ștergerea.",
+        )
+
+    meetings_deleted = (await meetings_col.delete_many({"tenant_id": tenant_id})).deleted_count
+    members_result = await users_col.update_many(
+        {"tenant_id": tenant_id}, {"$set": {"tenant_id": None, "role": "member"}}
+    )
+    invitations_deleted = (await invitations_col.delete_many({"tenant_id": tenant_id})).deleted_count
+    await tenants_col.delete_one({"_id": ObjectId(tenant_id)})
+
+    await log_audit_event(
+        "tenant.wipe", "tenant", tenant_id, user=user, tenant_id=tenant_id,
+        extra={
+            "tenant_name": tenant.get("name"),
+            "meetings_deleted": meetings_deleted,
+            "members_detached": members_result.modified_count,
+            "invitations_deleted": invitations_deleted,
+        },
+    )
+    await alert_security_incident(
+        "Organizație ștearsă complet",
+        {
+            "organizatie": tenant.get("name"),
+            "declansat_de": user.get("email"),
+            "sedinte_sterse": meetings_deleted,
+            "membri_detasati": members_result.modified_count,
+        },
+    )
+
+    return {
+        "message": f"Organizația „{tenant.get('name')}” și toate datele asociate au fost șterse definitiv.",
+        "meetings_deleted": meetings_deleted,
+        "members_detached": members_result.modified_count,
+        "invitations_deleted": invitations_deleted,
+        "note": "Copiile de siguranță (backup) mai vechi expiră automat conform politicii de retenție.",
+    }
 
 
 # ==================== INVITE FLOW ====================
@@ -3358,6 +3803,7 @@ async def change_user_role(user_id: str, body: RoleUpdateBody, user: dict = Depe
         raise HTTPException(status_code=400, detail="Nu îți poți retrage propriul rol de admin")
 
     await users_col.update_one({"_id": ObjectId(user_id)}, {"$set": {"role": body.role}})
+    schedule_audit("user.role_change", "user", user_id, user=user, extra={"new_role": body.role, "target_email": target.get("email")})
     return {"message": f"Rol actualizat la {ROLE_LABELS_RO.get(body.role, body.role)}", "role": body.role}
 
 
@@ -3713,6 +4159,7 @@ async def get_meetings_by_date(
 async def get_meeting(meeting_id: str, user: dict = Depends(get_current_user)):
     """Get single meeting detail."""
     meeting = await verify_meeting_ownership(meeting_id, user)
+    schedule_audit("meeting.view", "meeting", meeting_id, user=user)
     return serialize_doc(meeting)
 
 
@@ -3753,6 +4200,7 @@ async def delete_meeting(meeting_id: str, user: dict = Depends(get_current_user)
         os.remove(meeting["audio_path"])
     
     await meetings_col.delete_one({"_id": ObjectId(meeting_id)})
+    schedule_audit("meeting.delete", "meeting", meeting_id, user=user, extra={"title": meeting.get("title")})
     return {"status": "deleted"}
 
 
@@ -4295,6 +4743,7 @@ async def export_pdf(meeting_id: str, user: dict = Depends(get_current_user)):
     meeting = await verify_meeting_ownership(meeting_id, user)
     if not _meeting_has_exportable_content(meeting):
         raise HTTPException(status_code=422, detail=_EMPTY_MEETING_MESSAGE)
+    schedule_audit("meeting.export", "meeting", meeting_id, user=user, extra={"format": "pdf"})
 
     from fpdf import FPDF
 
@@ -4463,6 +4912,7 @@ async def export_docx(meeting_id: str, user: dict = Depends(get_current_user)):
     meeting = await verify_meeting_ownership(meeting_id, user)
     if not _meeting_has_exportable_content(meeting):
         raise HTTPException(status_code=422, detail=_EMPTY_MEETING_MESSAGE)
+    schedule_audit("meeting.export", "meeting", meeting_id, user=user, extra={"format": "docx"})
 
     from docx import Document
     from docx.shared import Pt
@@ -4606,6 +5056,7 @@ async def export_proces_verbal(meeting_id: str, user: dict = Depends(get_current
     meeting = await verify_meeting_ownership(meeting_id, user)
     if not _meeting_has_exportable_content(meeting):
         raise HTTPException(status_code=422, detail=_EMPTY_MEETING_MESSAGE)
+    schedule_audit("meeting.export", "meeting", meeting_id, user=user, extra={"format": "proces-verbal"})
 
     # Diagnostic log — helps debug missing-content reports
     vc_dbg = meeting.get("vertical_config") or {}
